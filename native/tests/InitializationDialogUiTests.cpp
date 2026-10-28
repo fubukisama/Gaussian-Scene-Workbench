@@ -1,6 +1,7 @@
 #include "InitializationDialog.h"
 #include "InitializationEditor.h"
 #include "AppLanguage.h"
+#include "UiFormVisualProbe.h"
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -15,6 +16,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <cstdio>
@@ -25,10 +27,25 @@
 static bool waitFor(const std::function<bool()> &ready) {QElapsedTimer timer;timer.start();while(!ready()&&timer.elapsed()<30000){QEventLoop loop;QTimer::singleShot(10,&loop,&QEventLoop::quit);loop.exec();}return ready();}
 static QByteArray digest(const QString &path){QFile file(path);return file.open(QIODevice::ReadOnly)?QCryptographicHash::hash(file.readAll(),QCryptographicHash::Sha256):QByteArray();}
 int main(int argc,char **argv) {
-  qputenv("QT_QPA_PLATFORM","offscreen");QApplication app(argc,argv);if(app.arguments().size()!=3)return 2;
-  const QString root=app.arguments()[1],python=app.arguments()[2];bool passed=true;
+  const bool visualForms=gsw::tests::uiFormsRequested(argc,argv);
+  if(!gsw::tests::configureUiFormsPlatform(visualForms)){
+    std::fprintf(stderr,"UI forms visual mode requires GITHUB_ACTIONS=true on Windows.\n");return 2;
+  }
+  QApplication app(argc,argv);auto arguments=app.arguments();
+  arguments.removeAll(QStringLiteral("--smoke-test-ui-forms"));if(arguments.size()!=3)return 2;
+  const QString root=arguments[1],python=arguments[2];bool passed=true;
   const auto check=[&](bool ok,const char *text){std::printf("Initialization dialog %s: %s\n",ok?"PASS":"FAIL",text);passed&=ok;};
   QTemporaryDir workspace(QDir(qEnvironmentVariable("GSW_INITIALIZATION_TEST_ROOT", QDir::tempPath())).filePath(QStringLiteral("dialog-XXXXXX")));
+  if(visualForms){
+    if(!workspace.isValid())return 2;
+    app.setOrganizationName(QStringLiteral("GSW-owned-initialization-ui-probe"));
+    app.setApplicationName(QStringLiteral("GSW-owned-initialization-ui-probe"));
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,workspace.path());
+  }
+  if(!gsw::tests::installUiFormsEvidence(app,visualForms,workspace.path())){
+    std::fprintf(stderr,"UI forms evidence installation refused; preserve the existing evidence root.\n");return 2;
+  }
   const QString source=workspace.filePath(QStringLiteral("source"));QDir().mkpath(source);
   QImage image(16,12,QImage::Format_RGB32);image.fill(QColor(31,61,91));check(image.save(QDir(source).filePath(QStringLiteral("image.png"))),"write owned image fixture");
   const QJsonObject initial{{"kind","random"},{"frame","source"},{"count",16},{"seed",0},{"priors",QJsonArray{}},{"bounds",QJsonArray{QJsonArray{0.,0.,2.},QJsonArray{1.,1.,3.}}},
@@ -76,12 +93,20 @@ int main(int argc,char **argv) {
       "real CPU worker returns the bound actual initialization, full coverage and raw request");
   check(dialog.report().value("point_sha256").toString().size()==64&&dialog.report().value("coverage").toObject().value("not_surface_evidence").toBool(),"geometry identity and visibility do not claim a measured surface");
   const auto report=dialog.report();for(const auto &locale:gsw::AppLanguage::supported()){check(gsw::AppLanguage::apply(locale,false),"native language applies immediately");check(dialog.requestDocument()==request&&dialog.report()==report,"three-language switching retains the request and actual worker report without rerunning");}
+  check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-3dgs-ready"),
+      QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
+        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+      "owned 3DGS initialization native surface matrix preserves its public request and actual CPU report");
   const QString saved=workspace.filePath(QStringLiteral("init-report.json"));check(dialog.saveReport(saved)&&!dialog.saveReport(saved),"report save is explicit and cannot overwrite older evidence");
   auto twoD=request;twoD["backend"]="2dgs";dialog.setRequestDocument(twoD);dialog.startInspection();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="ready"&&dialog.report().value("backend")=="2dgs"&&
       dialog.report().value("clipping").toObject().value("surface_intersection_visibility_not_predicted").toBool()&&
       dialog.report().value("clipping").toObject().value("runtime_gpu_verified")==false,
       "2DGS uses its own clipping contract and does not relabel CPU geometry checks as GPU training proof");
+  check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-2dgs-ready"),
+      QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
+        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+      "owned 2DGS initialization native surface matrix preserves its backend-specific CPU report and request");
   auto optical=request;optical["suggestion"]=QJsonObject{{"method","optical_axis_convergence"}};dialog.setRequestDocument(optical);dialog.requestSuggestion();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="needs_input"&&!dialog.report().contains("suggested_initialization"),
       "degenerate optical axes require input and cannot manufacture an object box or an applicable suggestion");
@@ -98,6 +123,10 @@ int main(int argc,char **argv) {
   dialog.requestSuggestion();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="suggestion_requires_confirmation"&&dialog.requestDocument()==depthRequest,
       "real camera-Z depth suggestion is visible but not automatically applied");
+  check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-suggestion-pending"),
+      QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
+        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+      "owned suggestion native surface matrix cannot adopt or publish the unconfirmed suggestion");
   auto *apply=dialog.findChild<QPushButton *>(QStringLiteral("initializationApplySuggestion"));
   check(apply&&apply->isEnabled()&&create&&!create->isEnabled(),"a suggestion cannot publish before explicit adoption and rechecking");
   dialog.applySuggestion();
@@ -176,6 +205,11 @@ int main(int argc,char **argv) {
         "the two-character-deeper final output still publishes when all actual artifact paths fit");
   }
   check(digest(metadata)==sourceHash&&digest(QDir(source).filePath(QStringLiteral("image.png")))==imageHash,"inspection, language changes and cancellation leave the source metadata and image bytes unchanged");
+  if(visualForms){
+    check(!dialog.isVisible()&&QApplication::platformName()=="windows","the explicit remote visual probe has hidden its owned windows without closing the original dialog");
+  }else{
   check(!dialog.isVisible()&&QApplication::platformName()=="offscreen","the production dialog is tested without show, GSW, OpenGL or a visible window");
+  }
+  gsw::tests::finishUiFormsEvidence(app,visualForms);
   return passed?0:1;
 }

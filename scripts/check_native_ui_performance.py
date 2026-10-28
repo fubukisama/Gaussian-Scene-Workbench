@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 import sys
 from typing import Any
@@ -22,6 +23,8 @@ MANIFEST_SCHEMA = "gsw.native_ui_performance_manifest/1"
 EXPECTED_COMBINATIONS = {("empty", 1), ("empty", 2), ("light", 1), ("medium", 1)}
 CASE_IDS = {"empty": ["empty"], "light": ["points", "mesh", "3dgs", "2dgs"], "medium": ["medium"]}
 MEDIUM_COUNT = 512202
+QA_FILES = ("native/src/UiPaintObservation.h", "native/src/UiPerformanceSmokeTest.cpp", "native/src/UiPerformanceSmokeTest.h")
+QA_MAIN = "native/src/main.cpp"
 
 
 class ContractError(ValueError):
@@ -199,9 +202,121 @@ def _range(value: Any, count: int, name: str) -> tuple[int, int]:
     return begin, end
 
 
+def validate_sources(manifest: dict[str, Any], acceptance_sha: str, plan_sha: str) -> tuple[dict[str, Any], str]:
+    """Verify the external build/overlay receipt, not producer identity labels."""
+    path = Path(manifest.get("sources", ""))
+    require(path.is_absolute() and path.is_file() and not path.is_symlink(), "external composite source receipt required")
+    sources = read_json(path)
+    require(sources.get("schema") == "gsw.ui_performance_sources/2" and sources.get("runId") == manifest["runnerId"],
+            "composite source receipt schema/runner mismatch")
+    require(sources.get("acceptanceSha256") == acceptance_sha and sources.get("planSha256") == plan_sha,
+            "source receipt changed the frozen acceptance or plan identity")
+    arms = sources.get("arms")
+    require(isinstance(arms, list) and len(arms) == 2 and {arm.get("arm") for arm in arms} == {"A", "B"},
+            "two unambiguous production source arms required")
+    identities = {arm["arm"]: arm for arm in arms}
+    overlay_path = Path(sources.get("commonObserverOverlayReceipt", ""))
+    require(overlay_path.is_absolute() and overlay_path.is_file() and not overlay_path.is_symlink(),
+            "actual common QA overlay receipt required")
+    overlay_sha = digest(overlay_path)
+    require(overlay_sha == sha(sources.get("commonObserverOverlayIdentity"), "overlay identity"), "common QA overlay receipt hash mismatch")
+    overlay = read_json(overlay_path)
+    require(overlay.get("schema") == "gsw.ui_performance_common_qa_overlay/1" and
+            overlay.get("sourceProductionBaseCommit") == manifest["baselineSourceCommit"] and
+            overlay.get("fromCommit") == manifest["candidateSourceCommit"], "QA overlay production-base/candidate identity mismatch")
+    require(overlay.get("untouchedBaselineBinary") is False and overlay.get("productionOutsideWhitelistUnchanged") is True and
+            overlay.get("unlistedTrackedDiff") == [], "baseline must explicitly disclose the whitelisted dirty QA composite")
+    changed = overlay.get("changedPaths")
+    require(isinstance(changed, list) and QA_MAIN in changed and len(changed) == len(set(changed)) and
+            set(changed).issubset(set(QA_FILES) | {QA_MAIN}), "unlisted production source changes in QA overlay")
+    diff_path = overlay_path.with_name("common-qa-overlay.diff")
+    require(diff_path.is_file() and digest(diff_path) == sha(overlay.get("actualDiffSha256"), "actual overlay diff SHA"),
+            "actual QA overlay diff missing/hash mismatch")
+    headers = re.findall(r"^diff --git a/(\S+) b/(\S+)$", diff_path.read_text(encoding="utf-8-sig"), re.M)
+    require(bool(headers) and all(left == right and left in set(QA_FILES) | {QA_MAIN} for left, right in headers) and
+            {left for left, _ in headers} == set(changed), "actual retained diff contains unlisted production paths")
+    records = overlay.get("files")
+    require(isinstance(records, list) and {record.get("path") for record in records} == set(QA_FILES) and len(records) == len(QA_FILES),
+            "common observer/helper whitelist changed")
+    for arm, identity in identities.items():
+        base = manifest["baselineSourceCommit"] if arm == "A" else manifest["candidateSourceCommit"]
+        require(identity.get("sourceCommit") == identity.get("sourceProductionBaseCommit") == base,
+                "source arm must distinguish its production base identity")
+        sha(identity.get("baseSourceTree"), "base source tree", 40)
+        sha(identity.get("sourceTree"), "actual composite source tree", 40)
+        require(identity.get("workingTreeIsClean") is (arm == "B") and
+                identity.get("commonObserverOverlayApplied") is (arm == "A"), "A must be declared dirty QA composite; B is its committed source")
+        require(identity.get("commonObserverOverlayIdentity") == overlay_sha and
+                identity.get("commonObserverOverlayFromCommit") == manifest["candidateSourceCommit"],
+                "common QA overlay provenance differs between arms")
+        directory = Path(identity.get("sourceDirectory", ""))
+        require(directory.is_absolute() and directory.is_dir(), "actual arm source directory required")
+        executable = Path(identity.get("executable", ""))
+        require(executable.is_absolute() and executable.is_file() and
+                digest(executable) == sha(identity.get("executableSha256"), "build executable SHA"), "actual built arm executable mismatch")
+        for record in records:
+            sha(record.get("beforeSha256"), "pre-overlay file SHA")
+            actual = directory / record["path"]
+            require(actual.is_file() and digest(actual) == sha(record.get("afterSha256"), "common QA file SHA"),
+                    "actual common observer/helper bytes differ from external receipt")
+    a, b = identities["A"], identities["B"]
+    require(overlay.get("baseTree") == a["baseSourceTree"] and overlay.get("compositeTree") == a["sourceTree"] and
+            a["baseSourceTree"] != a["sourceTree"] and b["baseSourceTree"] == b["sourceTree"],
+            "actual overlay tree must not masquerade as clean frozen baseline tree")
+    patch = overlay.get("mainPatch")
+    require(isinstance(patch, dict) and patch.get("path") == QA_MAIN and
+            patch.get("prefixUnchanged") is True and patch.get("suffixUnchanged") is True, "main.cpp non-QA preservation proof missing")
+    sha(patch.get("baselineBlob"), "frozen main blob", 40)
+    sha(patch.get("beforeSha256"), "frozen main raw SHA")
+    sha(patch.get("beforeBlockSha256"), "frozen main QA-block SHA")
+    main_a = Path(a["sourceDirectory"]) / QA_MAIN
+    main_b = Path(b["sourceDirectory"]) / QA_MAIN
+    require(digest(main_a) == sha(patch.get("afterSha256"), "composite main SHA"), "actual composite main.cpp byte hash mismatch")
+    pattern = re.compile(r"^  if \(parser\.isSet\(uiPerformanceOption\)\) \{\r?\n(?:(?!^  \}).)*^  \}\r?\n(?=  window\.show\(\);)", re.M | re.S)
+    blocks = [pattern.findall(path.read_text(encoding="utf-8-sig")) for path in (main_a, main_b)]
+    require(all(len(block) == 1 for block in blocks) and blocks[0][0] == blocks[1][0] and
+            "prepareUiPerformanceWindow(window)" in blocks[0][0] and
+            hashlib.sha256(blocks[0][0].encode("utf-8")).hexdigest() == patch.get("afterBlockSha256"),
+            "actual A/B pre-show QA blocks differ from shared preparation recipe")
+    guards = overlay.get("protectedProductionFiles")
+    require(isinstance(guards, list) and any(item.get("path") == "native/src/NativeViewport.cpp" for item in guards),
+            "protected baseline viewport proof missing")
+    for guard in guards:
+        relative = guard.get("path")
+        require(isinstance(relative, str) and relative.startswith("native/src/") and ".." not in Path(relative).parts and
+                relative not in set(QA_FILES) | {QA_MAIN}, "invalid production guard path")
+        require(guard.get("beforeSha256") == sha(guard.get("afterSha256"), "unchanged production SHA") and
+                digest(Path(a["sourceDirectory"]) / relative) == guard["beforeSha256"], "baseline production viewport/render bytes changed")
+    return identities, digest(path)
+
+
+def validate_exposure(value: Any, recorded: bool, group: dict[str, Any]) -> None:
+    require(isinstance(value, dict), "exposure predicate snapshot missing")
+    require(value.get("logicalSize") == [640, 360] and value.get("actualDpr") == group["dpr"],
+            "exposure snapshot does not describe actual fixed viewport/DPR")
+    for field in ("globalViewportRect", "screenAvailableRect", "screenGeometryRect", "windowRect", "windowFrameGeometry"):
+        rectangle = value.get(field)
+        require(isinstance(rectangle, list) and len(rectangle) == 4 and all(type(n) is int for n in rectangle),
+                "exposure rectangle missing: " + field)
+    for field in ("screenContainsViewport", "visible", "windowExists", "windowExposed", "windowMinimized", "contextExists", "contextValid", "fullyExposed"):
+        require(type(value.get(field)) is bool, "exposure predicate missing: " + field)
+    ancestors = value.get("ancestors")
+    require(isinstance(ancestors, list) and bool(ancestors), "ancestor exposure predicates missing")
+    for parent in ancestors:
+        require(type(parent.get("containsViewport")) is bool and type(parent.get("visible")) is bool and
+                isinstance(parent.get("rect"), list) and len(parent["rect"]) == 4 and
+                isinstance(parent.get("viewportRect"), list) and len(parent["viewportRect"]) == 4,
+                "ancestor exposure geometry missing")
+    if recorded:
+        require(value["fullyExposed"] and value["screenContainsViewport"] and value["visible"] and
+                value["windowExists"] and value["windowExposed"] and not value["windowMinimized"] and
+                value["contextExists"] and value["contextValid"] and all(parent["containsViewport"] for parent in ancestors),
+                "RECORDED cannot fake failed exposure predicates")
+
+
 def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[str, Any],
                      manifest: dict[str, Any], acceptance: dict[str, Any],
-                     fixture_cache: dict[Path, tuple[str, int]]) -> dict[str, Any]:
+                     fixture_cache: dict[Path, tuple[str, int]], source_identity: dict[str, Any], source_receipt_sha: str) -> dict[str, Any]:
     require(report.get("schema") == PROCESS_SCHEMA, "process receipt schema")
     require(report.get("status") in ("RECORDED", "FAIL", "INCONCLUSIVE"), "process status")
     require(report.get("status") != "FAIL" and not report.get("failures"), "producer reported a structural failure")
@@ -211,6 +326,10 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
     expected_source = manifest["baselineSourceCommit"] if entry["arm"] == "A" else manifest["candidateSourceCommit"]
     require(report.get("sourceCommit") == expected_source, "process source identity mismatch")
     sha(report.get("executableSha256"), "executableSha256")
+    require(report.get("sourceIdentity") == source_identity and report.get("sourcesReceiptSha256") == source_receipt_sha and
+            report["executableSha256"] == source_identity["executableSha256"],
+            "process composite identity does not match independent external build receipt")
+    validate_exposure(report.get("exposure"), report["status"] == "RECORDED", group)
     if report["status"] == "INCONCLUSIVE":
         require(isinstance(report.get("unready"), list) and bool(report["unready"]), "INCONCLUSIVE must retain an environment/deadline reason")
         # Partial recordings are evidence, never substituted with synthetic zero
@@ -240,7 +359,8 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
                 "diagnostic overlap or invalid cache state")
     _range(report.get("preWindowWarmRange"), len(samples), "preWindowWarmRange")
     if report["status"] == "INCONCLUSIVE":
-        return {"inconclusive": report["unready"], "metrics": {}, "cases": {}, "environment": report.get("environment", {})}
+        return {"inconclusive": report["unready"], "metrics": {}, "cases": {}, "environment": report.get("environment", {}),
+                "exposure": report["exposure"]}
     environment = validate_environment(report.get("environment"), group)
     for sample in samples:
         require(sample.get("logicalSize") == environment["logicalSize"] and
@@ -249,7 +369,7 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
     cases = report.get("cases")
     require(isinstance(cases, list) and [case.get("id") for case in cases] == CASE_IDS[group["scenario"]],
             "missing, reordered or duplicate scenario case")
-    result: dict[str, Any] = {"metrics": {}, "cases": {}, "environment": environment, "inconclusive": []}
+    result: dict[str, Any] = {"metrics": {}, "cases": {}, "environment": environment, "inconclusive": [], "exposure": report["exposure"]}
     result["metrics"]["process/cold_overlay_build_ms"] = (samples[0]["hostNanoseconds"] / 1e6, "cold_overlay_build_delta_ms")
     last_end = 0
     idle_budget = acceptance["budgets"]["idle"]
@@ -345,6 +465,7 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
     inconclusive: list[str] = []
     comparisons: list[dict[str, Any]] = []
     raw_summaries: list[dict[str, Any]] = []
+    source_provenance: dict[str, Any] = {}
     frozen = False
     try:
         require(digest(acceptance_path) == FROZEN_ACCEPTANCE_SHA256, "frozen acceptance file changed; limits cannot be relaxed")
@@ -357,6 +478,9 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
         require(isinstance(manifest.get("runnerId"), str) and bool(manifest["runnerId"]), "manifest runner identity")
         sha(manifest.get("baselineSourceCommit"), "baseline source", 40)
         sha(manifest.get("candidateSourceCommit"), "candidate source", 40)
+        identities, sources_sha = validate_sources(manifest, FROZEN_ACCEPTANCE_SHA256, acceptance["plan_sha256"])
+        source_provenance = {"arms": identities, "sourcesReceiptSha256": sources_sha,
+                             "baselineMeaning": "frozen pre-AA production plus explicit source-bound common QA overlay, not an untouched baseline binary"}
         groups = manifest.get("expectedGroups")
         require(isinstance(groups, list) and len(groups) == len(EXPECTED_COMBINATIONS), "four frozen scenario/DPR groups required")
         require({(g.get("scenario"), g.get("dpr")) for g in groups} == EXPECTED_COMBINATIONS and
@@ -381,14 +505,16 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
                 require(path.is_absolute() and path.is_file() and not path.is_symlink(), "real process result file required")
                 require(digest(path) == sha(entry.get("sha256"), "result SHA"), "result file SHA mismatch")
                 report = read_json(path)
-                result = validate_process(report, entry, group_by_id[entry["group"]], manifest, acceptance, fixture_cache)
+                result = validate_process(report, entry, group_by_id[entry["group"]], manifest, acceptance, fixture_cache,
+                                          identities[entry["arm"]], sources_sha)
                 if "exitCode" in entry:
                     require(entry["exitCode"] == (3 if report["status"] == "INCONCLUSIVE" else 0), "exit code/receipt status mismatch")
                 old_exe = exe_by_arm.setdefault(entry["arm"], report["executableSha256"])
                 require(old_exe == report["executableSha256"], "arm executable changed between fresh processes")
                 results[key] = result
                 inconclusive.extend(label + ": " + reason for reason in result["inconclusive"])
-                raw_summaries.append({"group": key[0], "round": key[1], "arm": key[2], "metrics": result["metrics"], "cases": result["cases"]})
+                raw_summaries.append({"group": key[0], "round": key[1], "arm": key[2], "metrics": result["metrics"],
+                                      "cases": result["cases"], "exposure": result["exposure"]})
             except (ContractError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError) as error:
                 failures.append(label + ": " + str(error))
         for group in groups:
@@ -438,6 +564,7 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
             "status": "FAIL" if failures else "INCONCLUSIVE" if inconclusive else "PASS",
             "freeze": "NO_THRESHOLDS_RELAXED" if frozen else "INVALID_FREEZE",
             "acceptanceSha256": FROZEN_ACCEPTANCE_SHA256,
+            "sourceProvenance": source_provenance,
             "scope": "paired Windows light-theme emptyDPR1/emptyDPR2/lightDPR1/mediumDPR1 host/presentation/idle slice",
             "unitOfReplication": "three fresh process pairs per group; frames are nested, not independent replicates",
             "failures": failures, "inconclusive": inconclusive, "comparisons": comparisons, "rawSummaries": raw_summaries,

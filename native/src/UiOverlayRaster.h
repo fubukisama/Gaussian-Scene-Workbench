@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QFont>
+#include <QDebug>
 #include <QImage>
 #include <QJsonObject>
 #include <QPainter>
@@ -24,6 +25,11 @@ class UiOverlayRaster final {
 public:
   static constexpr quint64 byteLimit = 8ULL * 1024 * 1024;
   using Draw = std::function<void(QPainter &, QJsonObject &)>;
+  void setTraceEnabled(bool enabled) { mTraceEnabled = enabled; }
+  // Diagnostic treatment only until a separate real-window red/green result.
+  void setGrayscaleTextProbe(bool enabled) {
+    if (mGrayscaleTextProbe != enabled) { clear(); mGrayscaleTextProbe = enabled; }
+  }
 
   bool paint(QPainter &target, const QRectF &logicalBounds,
              const QByteArray &key, const Draw &draw) {
@@ -59,6 +65,8 @@ public:
         mImage.size() != pixels || mFont != target.font() ||
         mLogicalDpiX != logicalDpiX || mLogicalDpiY != logicalDpiY) {
       clear();
+      if (mTraceEnabled) qInfo() << "UI_RASTER_TRACE allocate" << pixels << "DPR" << dpr
+                                << "logicalDPI" << logicalDpiX << logicalDpiY << "font" << target.font().families();
       QImage coverage(pixels, QImage::Format_ARGB32_Premultiplied);
       if (coverage.isNull()) return false;
       coverage.setDevicePixelRatio(dpr);
@@ -66,13 +74,19 @@ public:
       coverage.setDotsPerMeterY(qRound(logicalDpiY / 0.0254));
       coverage.fill(Qt::transparent);
       QPainter raster(&coverage);
+      if (mTraceEnabled) qInfo("UI_RASTER_TRACE raster-begin");
       if (!raster.isActive()) return false;
       raster.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
-      raster.setFont(target.font());
+      QFont coverageFont = target.font();
+      if (mGrayscaleTextProbe)
+        coverageFont.setStyleStrategy(QFont::StyleStrategy(coverageFont.styleStrategy() | QFont::NoSubpixelAntialias));
+      raster.setFont(coverageFont);
       raster.translate(-origin);
       raster.setClipRect(QRectF(origin, QSizeF(pixels) / dpr));
       QJsonObject diagnostics;
+      if (mTraceEnabled) qInfo("UI_RASTER_TRACE draw-vectors-begin");
       draw(raster, diagnostics);
+      if (mTraceEnabled) qInfo("UI_RASTER_TRACE draw-vectors-end");
       if (!raster.end()) return false;
       mImage = std::move(coverage);
       mKey = key;
@@ -88,11 +102,13 @@ public:
       mLastHit = true;
     }
     target.save();
+    if (mTraceEnabled) qInfo("UI_RASTER_TRACE composite-begin");
     // The source already has exact physical dimensions: no second filtering
     // or logical-size rounding that would blur a correctly covered contour.
     target.setRenderHint(QPainter::SmoothPixmapTransform, false);
     target.drawImage(mOrigin, mImage);
     target.restore();
+    if (mTraceEnabled) qInfo("UI_RASTER_TRACE composite-end");
     return true;
   }
 
@@ -121,6 +137,8 @@ private:
   quint64 mGeneration = 0;
   quint64 mPeakCpuBytes = 0;
   bool mLastHit = false;
+  bool mTraceEnabled = false;
+  bool mGrayscaleTextProbe = false;
 };
 
 } // namespace gsw

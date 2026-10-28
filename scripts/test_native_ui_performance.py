@@ -108,6 +108,7 @@ class UiPerformanceCliContracts(unittest.TestCase):
         self.manifest = {"schema": "gsw.native_ui_performance_manifest/1", "runnerId": "contract-owned-runner",
             "baselineSourceCommit": "a" * 40, "candidateSourceCommit": "b" * 40,
             "expectedGroups": copy.deepcopy(GROUPS), "processes": []}
+        self.create_source_receipts()
         for group in GROUPS:
             for round_index, order in enumerate((("A", "B"), ("B", "A"), ("A", "B")), 1):
                 for arm in order:
@@ -117,6 +118,62 @@ class UiPerformanceCliContracts(unittest.TestCase):
                     self.reports[(group["id"], round_index, arm)] = (path, report)
                     self.manifest["processes"].append({"group": group["id"], "round": round_index, "arm": arm,
                         "path": str(path.resolve()), "sha256": sha(path), "exitCode": 0, "timedOut": False})
+
+    def create_source_receipts(self):
+        # Actual owned files behind the external receipt. These are never run;
+        # tests exercise the checker CLI, not a fake program's behavior.
+        self.source_dirs = {}
+        qa_files = ("native/src/UiPaintObservation.h", "native/src/UiPerformanceSmokeTest.cpp", "native/src/UiPerformanceSmokeTest.h")
+        main_block = (
+            "  if (parser.isSet(uiPerformanceOption)) {\n"
+            "    if (!gsw::prepareUiPerformanceWindow(window)) return 2;\n"
+            "    if (auto *viewport = window.findChild<gsw::NativeViewport *>())\n"
+            "      viewport->setUiPaintObservationEnabled(true);\n"
+            "  }\n")
+        for arm in ("A", "B"):
+            directory = self.root / ("source-" + arm)
+            (directory / "native/src").mkdir(parents=True)
+            self.source_dirs[arm] = directory
+            for relative in qa_files:
+                (directory / relative).write_text("// common passive QA fixture\n", encoding="utf-8", newline="\n")
+            (directory / "native/src/main.cpp").write_text("// non-QA prefix\n" + main_block + "  window.show();\n", encoding="utf-8", newline="\n")
+            (directory / "native/src/NativeViewport.cpp").write_text("// production " + arm + "\n", encoding="utf-8", newline="\n")
+            (directory / "owned.exe").write_bytes(("not executable; CLI receipt contract " + arm).encode())
+        diff = self.root / "common-qa-overlay.diff"
+        diff.write_text("diff --git a/native/src/main.cpp b/native/src/main.cpp\n"
+                        "--- a/native/src/main.cpp\n+++ b/native/src/main.cpp\n"
+                        "@@ -1 +1 @@\n-old QA block\n+common QA block\n", encoding="utf-8", newline="\n")
+        a = self.source_dirs["A"]
+        protected = sha(a / "native/src/NativeViewport.cpp")
+        overlay = {"schema": "gsw.ui_performance_common_qa_overlay/1", "sourceProductionBaseCommit": "a" * 40,
+            "fromCommit": "b" * 40, "files": [{"path": relative, "beforeSha256": "c" * 64,
+                "afterSha256": sha(a / relative)} for relative in qa_files],
+            "mainPatch": {"path": "native/src/main.cpp", "baselineBlob": "c" * 40, "beforeSha256": "c" * 64,
+                "afterSha256": sha(a / "native/src/main.cpp"), "beforeBlockSha256": "c" * 64,
+                "afterBlockSha256": hashlib.sha256(main_block.encode()).hexdigest(), "prefixUnchanged": True, "suffixUnchanged": True},
+            "changedPaths": ["native/src/main.cpp"], "protectedProductionFiles": [
+                {"path": "native/src/NativeViewport.cpp", "beforeSha256": protected, "afterSha256": protected}],
+            "unlistedTrackedDiff": [], "actualDiffSha256": sha(diff), "baseTree": "c" * 40,
+            "compositeTree": "d" * 40, "untouchedBaselineBinary": False, "productionOutsideWhitelistUnchanged": True}
+        self.overlay_path = self.root / "common-qa-overlay.json"
+        dump(self.overlay_path, overlay)
+        self.source_identities = {}
+        for arm in ("A", "B"):
+            directory = self.source_dirs[arm]
+            self.source_identities[arm] = {"arm": arm, "sourceCommit": ("a" if arm == "A" else "b") * 40,
+                "sourceProductionBaseCommit": ("a" if arm == "A" else "b") * 40,
+                "baseSourceTree": ("c" if arm == "A" else "e") * 40, "sourceTree": ("d" if arm == "A" else "e") * 40,
+                "workingTreeIsClean": arm == "B", "commonObserverOverlayApplied": arm == "A",
+                "commonObserverOverlayFromCommit": "b" * 40, "commonObserverOverlayIdentity": sha(self.overlay_path),
+                "sourceDirectory": str(directory.resolve()), "executable": str((directory / "owned.exe").resolve()),
+                "executableSha256": sha(directory / "owned.exe")}
+        self.sources_path = self.root / "sources.json"
+        acceptance = json.loads(ACCEPTANCE.read_text(encoding="utf-8-sig"))
+        dump(self.sources_path, {"schema": "gsw.ui_performance_sources/2", "runId": "contract-owned-runner",
+            "arms": list(self.source_identities.values()), "commonObserverOverlayReceipt": str(self.overlay_path.resolve()),
+            "commonObserverOverlayIdentity": sha(self.overlay_path), "acceptanceSha256": sha(ACCEPTANCE),
+            "planSha256": acceptance["plan_sha256"]})
+        self.manifest["sources"] = str(self.sources_path.resolve())
 
     def report(self, group: dict, round_index: int, arm: str) -> dict:
         observed = [sample(1)]
@@ -174,7 +231,15 @@ class UiPerformanceCliContracts(unittest.TestCase):
             observation["actualDpr"] = dpr
         return {"schema": "gsw.native_ui_performance_process/1", "status": "RECORDED", "arm": arm,
             "round": round_index, "scenario": group["scenario"], "runnerId": "contract-owned-runner",
-            "sourceCommit": ("a" if arm == "A" else "b") * 40, "executableSha256": ("a" if arm == "A" else "b") * 64,
+            "sourceCommit": ("a" if arm == "A" else "b") * 40, "executableSha256": self.source_identities[arm]["executableSha256"],
+            "sourceIdentity": copy.deepcopy(self.source_identities[arm]), "sourcesReceiptSha256": sha(self.sources_path),
+            "exposure": {"logicalSize": [640, 360], "actualDpr": dpr, "globalViewportRect": [10, 10, 640, 360],
+                "screenAvailableRect": [0, 0, 1920, 1080], "screenGeometryRect": [0, 0, 1920, 1080],
+                "windowRect": [0, 0, 640, 390], "windowFrameGeometry": [10, 10, 650, 420],
+                "screenContainsViewport": True, "visible": True, "windowExists": True, "windowExposed": True,
+                "windowMinimized": False, "contextExists": True, "contextValid": True, "fullyExposed": True,
+                "ancestors": [{"class": "QMainWindow", "rect": [0, 0, 640, 390], "viewportRect": [0, 20, 640, 360],
+                    "containsViewport": True, "visible": True}]},
             "environment": {"logicalSize": [640, 360], "physicalSize": [640 * dpr, 360 * dpr],
                 "glViewport": [0, 0, 640 * dpr, 360 * dpr], "actualDpr": dpr, "qtScaleFactor": str(dpr),
                 "qtVersion": "6.8.3", "qpaPlatform": "windows", "glVendor": "contract vendor",
@@ -270,6 +335,51 @@ class UiPerformanceCliContracts(unittest.TestCase):
     def test_process_source_identity_is_not_a_label_only(self):
         self.receipt()["sourceCommit"] = "c" * 40
         self.assert_failed("process source identity mismatch")
+
+    def test_partial_millisecond_settling_remains_rejected(self):
+        case = self.receipt()["cases"][0]
+        case["idle"][0]["beginNs"] = case["events"][-1]["presentNs"] + 599_999_999
+        self.assert_failed("idle did not actually settle before observation")
+
+    def test_partial_millisecond_idle_window_remains_rejected(self):
+        window = self.receipt(group="medium-dpr1")["cases"][0]["idle"][0]
+        window["endNs"] = window["beginNs"] + 999_999_999
+        self.assert_failed("idle windows are too short or overlap")
+
+    def test_composite_identity_must_match_external_source_receipt(self):
+        self.receipt()["sourceIdentity"]["workingTreeIsClean"] = False
+        self.assert_failed("process composite identity does not match independent external build receipt")
+
+    def test_actual_common_qa_bytes_cannot_be_a_producer_label(self):
+        (self.source_dirs["B"] / "native/src/UiPerformanceSmokeTest.cpp").write_text("// different QA\n", encoding="utf-8")
+        self.assert_failed("actual common observer/helper bytes differ")
+
+    def test_baseline_production_viewport_must_remain_untouched_by_overlay(self):
+        (self.source_dirs["A"] / "native/src/NativeViewport.cpp").write_text("// changed production\n", encoding="utf-8")
+        self.assert_failed("baseline production viewport/render bytes changed")
+
+    def test_recorded_cannot_claim_true_exposure_when_ancestor_clips(self):
+        self.receipt()["exposure"]["ancestors"][0]["containsViewport"] = False
+        self.assert_failed("RECORDED cannot fake failed exposure predicates")
+
+    def test_unexposed_dpr2_keeps_diagnostics_and_is_inconclusive(self):
+        report = self.receipt(group="empty-dpr2")
+        report["status"] = "INCONCLUSIVE"
+        report["unready"] = ["fixed_viewport_not_fully_exposed"]
+        report["environment"] = {}
+        report["cases"] = []
+        report["observation"]["samples"] = report["observation"]["samples"][:1]
+        report["observation"]["count"] = 1
+        report["exposure"]["fullyExposed"] = False
+        report["exposure"]["ancestors"][0]["containsViewport"] = False
+        for entry in self.manifest["processes"]:
+            if entry["group"] == "empty-dpr2" and entry["round"] == 1 and entry["arm"] == "B":
+                entry["exitCode"] = 3
+        code, result = self.evaluate()
+        self.assertEqual((code, result["status"]), (3, "INCONCLUSIVE"), result)
+        observed = next(item for item in result["rawSummaries"] if
+                        item["group"] == "empty-dpr2" and item["round"] == 1 and item["arm"] == "B")
+        self.assertFalse(observed["exposure"]["ancestors"][0]["containsViewport"])
 
 
 if __name__ == "__main__":

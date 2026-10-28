@@ -18,6 +18,7 @@
 #include <QMouseEvent>
 #include <QPalette>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
@@ -28,10 +29,13 @@
 #include <QSplitter>
 #include <QStyle>
 #include <QStyleOptionButton>
+#include <QTabBar>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QToolBar>
+#include <QToolButton>
 #include <QVariant>
+#include <QVBoxLayout>
 #include <QtTest>
 #include <QtMath>
 
@@ -95,6 +99,54 @@ QColor pixelAt(const QImage &image, const QPoint &logicalPoint) {
 bool neutral(const QColor &color) {
   return color.red() == color.green() && color.green() == color.blue();
 }
+
+// Independent visual specification, not values read back from AppTheme.
+struct VisualRoleExpectation {
+  UiTheme theme;
+  const char *action;
+  const char *tint;
+  const char *pressed;
+  const char *ink;
+  const char *focus;
+  const char *hover;
+  const char *progress;
+  const char *disabledSurface;
+  const char *disabledText;
+  const char *window;
+  const char *panel;
+  const char *text;
+  const char *field;
+};
+constexpr VisualRoleExpectation visualRoles[] = {
+    {UiTheme::Dark, "#2d6bb2", "#243c56", "#2b4866", "#8cbcf0", "#78aef1",
+     "#303438", "#2d6bb2", "#242629", "#929a9f", "#17191b", "#1b1d1f",
+     "#e7e9ea", "#151719"},
+    {UiTheme::Light, "#2467a5", "#e4effb", "#d5e5f7", "#135f9b", "#135f9b",
+     "#e1e3e5", "#aecbe8", "#ededed", "#6b6b6b", "#f3f3f3", "#ffffff",
+     "#171717", "#ffffff"},
+};
+
+int pixelsNear(const QImage &image, const QRect &logicalBounds,
+               const QColor &expected, const int tolerance = 3) {
+  const qreal ratio = image.devicePixelRatio();
+  const QRect physical(qFloor(logicalBounds.x() * ratio),
+                       qFloor(logicalBounds.y() * ratio),
+                       qCeil(logicalBounds.width() * ratio),
+                       qCeil(logicalBounds.height() * ratio));
+  const QRect bounds = physical.intersected(image.rect());
+  int result = 0;
+  for (int y = bounds.top(); y <= bounds.bottom(); ++y) {
+    for (int x = bounds.left(); x <= bounds.right(); ++x) {
+      const QColor pixel = image.pixelColor(x, y);
+      if (pixel.alpha() >= 250 &&
+          std::abs(pixel.red() - expected.red()) <= tolerance &&
+          std::abs(pixel.green() - expected.green()) <= tolerance &&
+          std::abs(pixel.blue() - expected.blue()) <= tolerance)
+        ++result;
+    }
+  }
+  return result;
+}
 } // namespace
 
 class AppThemeTests final : public QObject {
@@ -126,6 +178,9 @@ private slots:
   void keepsDockTitlesCompactAcrossScales();
   void rescalesDockExtentWhenDensityChanges();
   void clampsManualScaleToSupportedRange();
+  void freezesSharedActionRolesAndPaletteSemantics();
+  void paintsSharedRolesAndTransparentLayoutLabels();
+  void keepsKeyboardFocusAndInteractionGeometryStable();
 
 private:
   std::unique_ptr<QTemporaryDir> mSettingsRoot;
@@ -1025,6 +1080,236 @@ void AppThemeTests::rescalesDockExtentWhenDensityChanges() {
 void AppThemeTests::clampsManualScaleToSupportedRange() {
   QCOMPARE(AppTheme::scaled(10, 60), 9);
   QCOMPARE(AppTheme::scaled(10, 180), 15);
+}
+
+void AppThemeTests::freezesSharedActionRolesAndPaletteSemantics() {
+  for (const VisualRoleExpectation &expected : visualRoles) {
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Action), QColor(expected.action));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::ActionTint), QColor(expected.tint));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::ActionPressed), QColor(expected.pressed));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::ActionInk), QColor(expected.ink));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Focus), QColor(expected.focus));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::OnAction), QColor("#ffffff"));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Hover), QColor(expected.hover));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Progress), QColor(expected.progress));
+    QVERIFY(AppTheme::color(expected.theme, UiColorRole::ActionTint) !=
+            AppTheme::color(expected.theme, UiColorRole::ActionPressed));
+    QVERIFY(contrast(QColor(expected.ink), QColor(expected.tint)) >= 4.5);
+    QVERIFY(contrast(QColor("#ffffff"), QColor(expected.action)) >= 4.5);
+    for (int index = 0; index < static_cast<int>(UiColorRole::Count); ++index) {
+      const QColor color = AppTheme::color(expected.theme, static_cast<UiColorRole>(index));
+      QVERIFY(color.isValid());
+      QCOMPARE(color.alpha(), 255);
+    }
+
+    const QPalette colors = AppTheme::palette(expected.theme);
+    for (const auto group : {QPalette::Active, QPalette::Inactive}) {
+      QCOMPARE(colors.color(group, QPalette::Window), QColor(expected.panel));
+      QCOMPARE(colors.color(group, QPalette::Base), QColor(expected.field));
+      QCOMPARE(colors.color(group, QPalette::WindowText), QColor(expected.text));
+      QCOMPARE(colors.color(group, QPalette::Text), QColor(expected.text));
+      QCOMPARE(colors.color(group, QPalette::Highlight), QColor(expected.action));
+      QCOMPARE(colors.color(group, QPalette::Accent), QColor(expected.action));
+      QCOMPARE(colors.color(group, QPalette::Link), QColor(expected.ink));
+      QCOMPARE(colors.color(group, QPalette::HighlightedText), QColor("#ffffff"));
+      QCOMPARE(colors.color(group, QPalette::ToolTipText),
+               expected.theme == UiTheme::Dark ? QColor("#ffffff") : QColor("#171717"));
+      QVERIFY(contrast(colors.color(group, QPalette::WindowText),
+                       QColor(expected.panel)) >= 7.0);
+    }
+    QCOMPARE(colors.color(QPalette::Disabled, QPalette::WindowText), QColor(expected.disabledText));
+    QCOMPARE(colors.color(QPalette::Disabled, QPalette::Base), QColor(expected.disabledSurface));
+    QVERIFY(contrast(colors.color(QPalette::Disabled, QPalette::Text),
+                     QColor(expected.disabledSurface)) >= 3.0);
+    // Meaningful result colors do not become the application action color.
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Success),
+             expected.theme == UiTheme::Dark ? QColor("#66c1a8") : QColor("#176b37"));
+    QCOMPARE(AppTheme::color(expected.theme, UiColorRole::Warning),
+             expected.theme == UiTheme::Dark ? QColor("#d9ad5b") : QColor("#805409"));
+    QVERIFY(AppTheme::color(expected.theme, UiColorRole::Success) != QColor(expected.action));
+    QVERIFY(AppTheme::color(expected.theme, UiColorRole::Warning) != QColor(expected.action));
+  }
+}
+
+void AppThemeTests::paintsSharedRolesAndTransparentLayoutLabels() {
+  for (const VisualRoleExpectation &expected : visualRoles) {
+    AppTheme::applyTheme(*qApp, expected.theme, false);
+    AppTheme::apply(*qApp, 100, false);
+    QDialog dialog;
+    dialog.resize(580, 400);
+    QLabel caption(QStringLiteral("Fixture label"), &dialog);
+    caption.setGeometry(16, 16, 420, 34);
+    QToolButton toggle(&dialog);
+    toggle.setText(QStringLiteral("Tool"));
+    toggle.setCheckable(true);
+    toggle.setFocusPolicy(Qt::NoFocus);
+    toggle.setGeometry(16, 62, 220, 42);
+    QLineEdit field(QStringLiteral("0.901234567891_日本語"), &dialog);
+    field.setFocusPolicy(Qt::NoFocus);
+    field.setGeometry(16, 120, 420, 42);
+    QCheckBox check(QStringLiteral("Fixture option"), &dialog);
+    check.setChecked(true);
+    check.setFocusPolicy(Qt::NoFocus);
+    check.setGeometry(16, 178, 420, 38);
+    QProgressBar progress(&dialog);
+    progress.setRange(0, 100);
+    progress.setValue(100);
+    progress.setTextVisible(false);
+    progress.setGeometry(16, 232, 420, 30);
+    QPushButton disabled(QStringLiteral("MMMM 0123456789"), &dialog);
+    disabled.setAutoDefault(false);
+    disabled.setEnabled(false);
+    disabled.setGeometry(16, 280, 420, 46);
+    dialog.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dialog, 2000));
+    QApplication::processEvents();
+    toggle.setAttribute(Qt::WA_UnderMouse, false);
+
+    const QString originalText = field.text();
+    const QRect originalToggleGeometry = toggle.geometry();
+    const QImage composed = painted(dialog);
+    QCOMPARE(pixelAt(composed, caption.pos() + QPoint(400, 10)), QColor(expected.window));
+    QCOMPARE(pixelAt(composed, check.pos() + QPoint(400, 10)), QColor(expected.window));
+    QCOMPARE(pixelAt(painted(field), QPoint(400, 10)), QColor(expected.field));
+    QCOMPARE(pixelAt(painted(progress), QPoint(400, 15)), QColor(expected.progress));
+    QCOMPARE(progress.value(), 100);
+
+    toggle.setChecked(true);
+    QApplication::processEvents();
+    QCOMPARE(pixelAt(painted(toggle), QPoint(200, 12)), QColor(expected.tint));
+    QCOMPARE(toggle.geometry(), originalToggleGeometry);
+    toggle.setDown(true);
+    QApplication::processEvents();
+    QCOMPARE(pixelAt(painted(toggle), QPoint(200, 12)), QColor(expected.pressed));
+    QCOMPARE(toggle.geometry(), originalToggleGeometry);
+    toggle.setDown(false);
+    toggle.setChecked(false);
+    toggle.setEnabled(false);
+    field.setEnabled(false);
+    QApplication::processEvents();
+    const QImage disabledField = painted(field);
+    QCOMPARE(pixelAt(disabledField, QPoint(400, 10)), QColor(expected.disabledSurface));
+    QCOMPARE(pixelAt(painted(disabled), QPoint(400, 10)), QColor(expected.disabledSurface));
+    QVERIFY(pixelsNear(disabledField, QRect(9, 5, 360, 31),
+                       QColor(expected.disabledText), 5) >= 4);
+    QVERIFY(contrast(QColor(expected.disabledText),
+                     pixelAt(disabledField, QPoint(400, 10))) >= 3.0);
+    QCOMPARE(toggle.geometry(), originalToggleGeometry);
+    QCOMPARE(field.text(), originalText);
+    QVERIFY(check.isChecked());
+    QVERIFY(!QSettings().contains(QStringLiteral("ui/theme")));
+    dialog.hide();
+  }
+}
+
+void AppThemeTests::keepsKeyboardFocusAndInteractionGeometryStable() {
+  for (const VisualRoleExpectation &expected : visualRoles) {
+    for (const int scale : {90, 100, 150}) {
+      AppTheme::applyTheme(*qApp, expected.theme, false);
+      AppTheme::apply(*qApp, scale, false);
+      QDialog dialog;
+      QVBoxLayout layout(&dialog);
+      layout.setContentsMargins(12, 12, 12, 12);
+      layout.setSpacing(8);
+      QLineEdit field(QStringLiteral("0.901234567891_日本語"), &dialog);
+      QPushButton button(QStringLiteral("Fixture action"), &dialog);
+      button.setAutoDefault(false);
+      button.setCheckable(true);
+      QToolButton tool(&dialog);
+      tool.setText(QStringLiteral("Fixture tool"));
+      tool.setCheckable(true);
+      tool.setFocusPolicy(Qt::StrongFocus);
+      QCheckBox check(QStringLiteral("Fixture check"), &dialog);
+      QRadioButton radio(QStringLiteral("Fixture radio"), &dialog);
+      QTabBar tabs(&dialog);
+      tabs.addTab(QStringLiteral("First"));
+      tabs.addTab(QStringLiteral("Second"));
+      tabs.setFocusPolicy(Qt::StrongFocus);
+      tabs.setExpanding(false);
+      QTableWidget table(2, 2, &dialog);
+      table.setItem(0, 0, new QTableWidgetItem(QStringLiteral("unchanged")));
+      table.setCurrentCell(0, 0);
+      table.setFixedHeight(AppTheme::scaled(110, scale));
+      const QList<QWidget *> controls = {&field, &button, &tool, &check, &radio, &tabs, &table};
+      for (QWidget *control : controls) layout.addWidget(control);
+      QWidget::setTabOrder(&field, &button);
+      QWidget::setTabOrder(&button, &tool);
+      QWidget::setTabOrder(&tool, &check);
+      QWidget::setTabOrder(&check, &radio);
+      QWidget::setTabOrder(&radio, &tabs);
+      QWidget::setTabOrder(&tabs, &table);
+      dialog.resize(600, 680);
+      dialog.show();
+      QVERIFY(QTest::qWaitForWindowExposed(&dialog, 2000));
+      dialog.activateWindow();
+      field.setFocus(Qt::TabFocusReason);
+      QTRY_VERIFY_WITH_TIMEOUT(field.hasFocus(), 2000);
+      QApplication::processEvents();
+      const auto geometries = [&] {
+        QList<QRect> values;
+        for (const QWidget *control : controls) values.append(control->geometry());
+        return values;
+      };
+      const auto hints = [&] {
+        QList<QSize> values;
+        for (const QWidget *control : controls) values.append(control->sizeHint());
+        return values;
+      };
+      const QList<QRect> originalGeometry = geometries();
+      const QList<QSize> originalHints = hints();
+      const QString originalText = field.text();
+      const QFont originalFont = qApp->font();
+      QVERIFY(pixelsNear(painted(field), field.rect(), QColor(expected.focus)) >= 8);
+
+      QTest::keyClick(&field, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(button.hasFocus(), 1000);
+      QVERIFY(pixelsNear(painted(button), button.rect(), QColor(expected.focus)) >= 8);
+      QCOMPARE(geometries(), originalGeometry);
+      QCOMPARE(hints(), originalHints);
+      QTest::keyClick(&button, Qt::Key_Space);
+      QVERIFY(button.isChecked());
+      QCOMPARE(geometries(), originalGeometry);
+      QCOMPARE(hints(), originalHints);
+      QTest::mouseMove(&button, button.rect().center());
+      QTest::mousePress(&button, Qt::LeftButton);
+      QVERIFY(button.isDown());
+      QCOMPARE(geometries(), originalGeometry);
+      QCOMPARE(hints(), originalHints);
+      QTest::mouseRelease(&button, Qt::LeftButton);
+      QCOMPARE(geometries(), originalGeometry);
+      QCOMPARE(hints(), originalHints);
+
+      QTest::keyClick(&button, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(tool.hasFocus(), 1000);
+      QVERIFY(pixelsNear(painted(tool), tool.rect(), QColor(expected.focus)) >= 8);
+      QTest::keyClick(&tool, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(check.hasFocus(), 1000);
+      QVERIFY(pixelsNear(painted(check), check.rect(), QColor(expected.focus)) >= 8);
+      QTest::keyClick(&check, Qt::Key_Space);
+      QVERIFY(check.isChecked());
+      QTest::keyClick(&check, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(radio.hasFocus(), 1000);
+      QVERIFY(pixelsNear(painted(radio), radio.rect(), QColor(expected.focus)) >= 8);
+      QTest::keyClick(&radio, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(tabs.hasFocus(), 1000);
+      const QRect tabBefore = tabs.tabRect(0);
+      const int tabHeight = tabs.height();
+      QTest::keyClick(&tabs, Qt::Key_Right);
+      QCOMPARE(tabs.currentIndex(), 1);
+      QCOMPARE(tabs.tabRect(0), tabBefore);
+      QCOMPARE(tabs.height(), tabHeight);
+      QTest::keyClick(&tabs, Qt::Key_Tab);
+      QTRY_VERIFY_WITH_TIMEOUT(table.hasFocus() || table.viewport()->hasFocus(), 1000);
+      QVERIFY(pixelsNear(painted(table), table.rect(), QColor(expected.focus)) >= 8);
+      QCOMPARE(geometries(), originalGeometry);
+      QCOMPARE(hints(), originalHints);
+      QCOMPARE(field.text(), originalText);
+      QCOMPARE(table.item(0, 0)->text(), QStringLiteral("unchanged"));
+      QCOMPARE(qApp->font(), originalFont);
+      QVERIFY(!QSettings().contains(QStringLiteral("ui/theme")));
+      dialog.hide();
+    }
+  }
 }
 
 QTEST_MAIN(AppThemeTests)

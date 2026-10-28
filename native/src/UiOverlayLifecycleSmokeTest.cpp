@@ -62,6 +62,7 @@ bool runUiOverlayLifecycleSmokeTest(NativeViewport &viewport) {
   }
   if (!present(viewport, [&] { viewport.update(); }) || !last().cacheHit) return false;
   for (int cycle = 0; cycle < 20; ++cycle) {
+    qInfo() << "UI_LIFECYCLE_TRACE theme/resize cycle" << cycle;
     auto generation = last().cacheGeneration;
     const UiTheme next = cycle % 2 ? theme : theme == UiTheme::Light ? UiTheme::Dark : UiTheme::Light;
     if (!present(viewport, [&] { AppTheme::applyTheme(*qApp, next, false); }) ||
@@ -75,6 +76,7 @@ bool runUiOverlayLifecycleSmokeTest(NativeViewport &viewport) {
   for (const QString &nextLanguage : AppLanguage::supported()) {
     if (nextLanguage == AppLanguage::current()) continue;
     const auto generation = last().cacheGeneration;
+    qInfo() << "UI_LIFECYCLE_TRACE language" << nextLanguage;
     if (!present(viewport, [&] { AppLanguage::apply(nextLanguage, false); }) ||
         last().cacheGeneration <= generation) return false;
   }

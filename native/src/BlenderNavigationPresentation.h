@@ -31,6 +31,7 @@
 
 #include <QFontMetricsF>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPaintEngine>
@@ -91,7 +92,7 @@ inline bool highlighted(const BlenderNavigationPresentationState &state,
 inline void drawBlenderNavigationPresentation(
     QPainter &painter, const NavigationGizmoLayout &layout,
     const BlenderNavigationPresentationState &state,
-    QJsonObject *diagnostics = nullptr) {
+    QJsonObject *diagnostics = nullptr, const bool trace = false) {
   using namespace blender_navigation_detail;
   if (!std::isfinite(layout.radius) || layout.radius <= 0.0 ||
       !std::isfinite(layout.center.x()) || !std::isfinite(layout.center.y())) return;
@@ -136,12 +137,15 @@ inline void drawBlenderNavigationPresentation(
   axisFont.setBold(true);
   axisFont.setPixelSize(std::clamp(qRound(layout.radius * 0.20 * 1.25), 9, 18));
   painter.setFont(axisFont);
+  if (trace) qInfo("NAV_PAINT_TRACE axis-font-set");
   if (diagnostics) {
+    if (trace) qInfo("NAV_PAINT_TRACE font-info-begin");
     const QFontInfo actual(axisFont);
     diagnostics->insert("axisFont", QJsonObject{{"requestedFamily", axisFont.family()},
         {"resolvedFamily", actual.family()}, {"pixelSize", actual.pixelSize()},
         {"pointSize", actual.pointSizeF()}, {"weight", actual.weight()},
         {"exactMatch", actual.exactMatch()}});
+    if (trace) qInfo("NAV_PAINT_TRACE font-info-end");
   }
 
   for (const NavigationAxisHandle *handle : order) {
@@ -192,6 +196,7 @@ inline void drawBlenderNavigationPresentation(
         {"radius", handle->radius}, {"strokeWidth", highlight ? ringWidth + 0.5 : ringWidth},
         {"outline", rgba(highlight ? QColor(Qt::white) : outline)},
         {"fill", rgba(fill)}, {"shaft", observedShaft}});
+    if (trace) qInfo() << "NAV_PAINT_TRACE ellipse" << handle->axisIndex << handle->positive;
     painter.drawEllipse(handle->center, handle->radius, handle->radius);
 
     if (handle->positive || highlight || handle->aligned) {
@@ -200,7 +205,9 @@ inline void drawBlenderNavigationPresentation(
       painter.setPen(highlight ? QColor(Qt::white) : QColor(0, 0, 0, rotationActive ? 255 : 230));
       const QRectF labelBounds(handle->center - QPointF(handle->radius, handle->radius),
                                QSizeF(handle->radius * 2.0, handle->radius * 2.0));
+      if (trace) qInfo() << "NAV_PAINT_TRACE axis-label-begin" << handle->axisIndex << handle->positive;
       painter.drawText(labelBounds, Qt::AlignCenter, label);
+      if (trace) qInfo("NAV_PAINT_TRACE axis-label-end");
     }
   }
 
@@ -209,10 +216,12 @@ inline void drawBlenderNavigationPresentation(
   labelFont.setPixelSize(std::clamp(qRound(layout.projectionLabel.height() * 0.5), 9, 13));
   painter.setFont(labelFont);
   painter.setPen(mix(backdrop, ink, 0.75));
+  if (trace) qInfo("NAV_PAINT_TRACE projection-label-begin");
   painter.drawText(layout.projectionLabel, Qt::AlignCenter,
                     state.orthographic
                         ? QCoreApplication::translate("Workbench", "正交")
                         : QCoreApplication::translate("Workbench", "透视"));
+  if (trace) qInfo("NAV_PAINT_TRACE projection-label-end");
 
   const auto miniButton = [&](const QRectF &bounds, const NavigationGizmoPart part,
                               const WorkbenchIconId icon, const bool selected = false,

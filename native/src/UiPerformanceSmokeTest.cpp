@@ -14,12 +14,14 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLayout>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include <QScreen>
+#include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
 #include <QVariant>
@@ -53,13 +55,21 @@ bool writeNew(const QString &path, const QByteArray &bytes) {
 }
 
 void dispatchFor(int milliseconds) {
-  QEventLoop loop;
-  QTimer timer;
-  timer.setTimerType(Qt::PreciseTimer);
-  timer.setSingleShot(true);
-  QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-  timer.start(milliseconds);
-  loop.exec();
+  // Qt's timer deadline and steady_clock can straddle a sub-millisecond
+  // rounding boundary. The timer only wakes the loop; it is not proof that
+  // the measured clock has observed the complete frozen idle interval.
+  const auto deadline = Clock::now() + std::chrono::milliseconds(milliseconds);
+  while (Clock::now() < deadline) {
+    const auto remaining = deadline - Clock::now();
+    const auto roundedUp = std::chrono::ceil<std::chrono::milliseconds>(remaining);
+    QEventLoop loop;
+    QTimer timer;
+    timer.setTimerType(Qt::PreciseTimer);
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(int(std::max<qint64>(1, roundedUp.count())));
+    loop.exec();
+  }
 }
 
 bool waitUntil(const std::function<bool()> &predicate, int timeout) {
@@ -218,6 +228,57 @@ bool fullyExposed(const NativeViewport &viewport) {
   }
   return true;
 }
+
+QJsonArray rectangle(const QRect &r) { return {r.x(), r.y(), r.width(), r.height()}; }
+
+QJsonObject exposureFacts(const NativeViewport &viewport) {
+  auto *window = viewport.window();
+  auto *handle = window ? window->windowHandle() : nullptr;
+  auto *screen = handle ? handle->screen() : viewport.screen();
+  const QRect global(viewport.mapToGlobal(QPoint()), viewport.size());
+  QJsonArray ancestors;
+  for (const QWidget *parent = viewport.parentWidget(); parent; parent = parent->parentWidget()) {
+    const QRect relative(viewport.mapTo(parent, QPoint()), viewport.size());
+    ancestors.append(QJsonObject{{"class", QString::fromLatin1(parent->metaObject()->className())},
+        {"rect", rectangle(parent->rect())}, {"viewportRect", rectangle(relative)},
+        {"containsViewport", parent->rect().contains(relative)}, {"visible", parent->isVisible()}});
+  }
+  return {{"logicalSize", QJsonArray{viewport.width(), viewport.height()}},
+      {"actualDpr", viewport.devicePixelRatioF()}, {"globalViewportRect", rectangle(global)},
+      {"screenAvailableRect", screen ? rectangle(screen->availableGeometry()) : QJsonArray()},
+      {"screenGeometryRect", screen ? rectangle(screen->geometry()) : QJsonArray()},
+      {"screenContainsViewport", screen && screen->availableGeometry().contains(global)},
+      {"visible", viewport.isVisible()}, {"windowExists", window != nullptr},
+      {"windowExposed", handle && handle->isExposed()}, {"windowMinimized", window && window->isMinimized()},
+      {"windowRect", window ? rectangle(window->rect()) : QJsonArray()},
+      {"windowFrameGeometry", window ? rectangle(window->frameGeometry()) : QJsonArray()},
+      {"contextExists", viewport.context() != nullptr}, {"contextValid", viewport.context() && viewport.context()->isValid()},
+      {"ancestors", ancestors}, {"fullyExposed", fullyExposed(viewport)}};
+}
+}
+
+bool prepareUiPerformanceWindow(QWidget &window) {
+  auto *viewport = window.findChild<NativeViewport *>();
+  if (qEnvironmentVariable("GITHUB_ACTIONS") != "true" ||
+      !qApp->arguments().contains(QStringLiteral("--smoke-test-ui-performance")) ||
+      qApp->property("gswSmokeSettingsDirectory").toString().isEmpty() ||
+      window.isVisible() || !viewport || !viewport->scenePath().isEmpty() || viewport->trainingGpuPreviewActive()) return false;
+  for (auto *dock : window.findChildren<QDockWidget *>()) dock->hide();
+  for (auto *bar : window.findChildren<QToolBar *>()) bar->hide();
+  for (auto *status : window.findChildren<QStatusBar *>()) status->hide();
+  window.setMinimumSize(0, 0);
+  viewport->setFixedSize(640, 360);
+  if (window.layout()) window.layout()->activate();
+  window.adjustSize();
+  // QWidget::adjustSize may apply a screen-size preference. Honour the owned
+  // layout's complete size hint explicitly; never clip/shrink the fixed view.
+  const QSize desired = window.sizeHint().expandedTo(window.minimumSizeHint()).expandedTo(QSize(640, 360));
+  window.resize(desired);
+  if (window.layout()) window.layout()->activate();
+  if (auto *screen = window.screen())
+    window.move(screen->availableGeometry().center() - QPoint(window.width() / 2, window.height() / 2));
+  window.setProperty("gswUiPerformancePrepared", true);
+  return viewport->size() == QSize(640, 360);
 }
 
 int runUiPerformanceSmokeTest(NativeViewport &viewport) {
@@ -245,6 +306,9 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
   QStringList failures, unready;
   QJsonArray cases;
   QJsonObject environment;
+  QJsonObject exposure;
+  QJsonObject sourceIdentity;
+  QString sourcesReceiptSha256;
   const qsizetype atEntry = viewport.uiPaintObservation().count;
   std::vector<Presentation> presentations;
   presentations.reserve(recordCapacity);
@@ -283,6 +347,7 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
     const QJsonObject result{{"schema", "gsw.native_ui_performance_process/1"}, {"status", status},
         {"arm", arm}, {"round", round}, {"scenario", scenario}, {"sourceCommit", source}, {"runnerId", runner},
         {"executableSha256", sha256(QCoreApplication::applicationFilePath())}, {"environment", environment},
+        {"exposure", exposure}, {"sourceIdentity", sourceIdentity}, {"sourcesReceiptSha256", sourcesReceiptSha256},
         {"preWindowWarmRange", QJsonArray{0, atEntry}}, {"cases", cases},
         {"observation", QJsonObject{{"enabled", observed.enabled}, {"capacity", UiPaintObservation::capacity},
             {"count", observed.count}, {"overflow", observed.overflow}, {"samples", samples}}},
@@ -308,6 +373,27 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
       qEnvironmentVariableIsSet("GSW_RENDER_DIAGNOSTICS_SMOKE")) {
     fail("diagnostics_enabled"); return finish();
   }
+  const QString sourcesPath = qEnvironmentVariable("GSW_UI_PERF_SOURCES_JSON");
+  QFile sourcesFile(sourcesPath);
+  if (!QDir::isAbsolutePath(sourcesPath) || !sourcesFile.open(QIODevice::ReadOnly)) {
+    fail("source_identity_receipt_missing"); return finish();
+  }
+  QJsonParseError sourcesError;
+  const auto sources = QJsonDocument::fromJson(sourcesFile.readAll(), &sourcesError).object();
+  sourcesReceiptSha256 = sha256(sourcesPath);
+  for (const auto &value : sources.value("arms").toArray()) {
+    const auto identity = value.toObject();
+    if (identity.value("arm").toString() == arm) {
+      if (!sourceIdentity.isEmpty()) { fail("source_identity_ambiguous"); return finish(); }
+      sourceIdentity = identity;
+    }
+  }
+  if (sourcesError.error != QJsonParseError::NoError || sources.value("schema") != "gsw.ui_performance_sources/2" ||
+      sourceIdentity.value("sourceProductionBaseCommit").toString() != source ||
+      sourceIdentity.value("executableSha256").toString() != sha256(QCoreApplication::applicationFilePath()) ||
+      sources.value("runId").toString() != runner || sourcesReceiptSha256.isEmpty()) {
+    fail("source_identity_receipt_mismatch"); return finish();
+  }
   const QString marker = fixtures.filePath("ownership.json");
   const QByteArray markerBytes("{\"schema\":\"gsw.ui_performance_owned_fixtures/1\"}\n");
   if (!QFileInfo::exists(marker)) {
@@ -321,19 +407,15 @@ int runUiPerformanceSmokeTest(NativeViewport &viewport) {
     }
   }
   auto *window = viewport.window();
-  // Only this isolated smoke window is resized. Inspector chrome is excluded
-  // to keep the actual viewport equal, including on a small DPR2 CI display.
-  for (auto *dock : window->findChildren<QDockWidget *>()) dock->hide();
-  for (auto *bar : window->findChildren<QToolBar *>()) bar->hide();
-  window->setMinimumSize(0, 0);
-  viewport.setFixedSize(640, 360);
-  window->adjustSize();
-  if (auto *screen = window->windowHandle() ? window->windowHandle()->screen() : nullptr)
-    window->move(screen->availableGeometry().center() - window->rect().center());
+  if (!window->property("gswUiPerformancePrepared").toBool()) {
+    fail("window_not_prepared_before_show"); exposure = exposureFacts(viewport); return finish();
+  }
   if (!waitUntil([&] { return fullyExposed(viewport) && viewport.context() && viewport.context()->isValid(); }, 3000)) {
+    exposure = exposureFacts(viewport);
     inconclusive("fixed_viewport_not_fully_exposed"); return finish();
   }
   dispatchFor(150);
+  exposure = exposureFacts(viewport);
   auto *context = viewport.context();
   viewport.makeCurrent();
   auto *gl = context->functions();

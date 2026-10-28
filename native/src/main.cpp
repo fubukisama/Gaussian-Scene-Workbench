@@ -43,6 +43,9 @@
 #include "UiClaritySmokeTest.h"
 #include "UiPerformanceSmokeTest.h"
 #include "UiOverlayLifecycleSmokeTest.h"
+#include "UiSurfaceEvidence.h"
+#include "GizmoViewportSmokeTest.h"
+#include "UiCrashDiagnostics.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -381,6 +384,9 @@ int main(int argc, char *argv[]) {
   QCommandLineOption uiOverlayLifecycleOption(QStringLiteral("smoke-test-ui-overlay-lifecycle"),
       QStringLiteral("Verify real navigation cache reuse/invalidation and presentation-only state through owned layout/language/theme cycles."));
   parser.addOption(uiOverlayLifecycleOption);
+  QCommandLineOption gizmoViewportOption(QStringLiteral("smoke-test-gizmo-viewport"),
+      QStringLiteral("Verify actual painted manipulation handles with public mouse/key input and raw owned evidence."));
+  parser.addOption(gizmoViewportOption);
   QCommandLineOption pointStreamingOption(QStringLiteral("smoke-test-point-streaming"),
       QStringLiteral("Verify bounded real point-cache streaming using an owned small diagnostic fixture."));
   parser.addOption(pointStreamingOption);
@@ -490,7 +496,7 @@ int main(int argc, char *argv[]) {
                          parser.isSet(processingCompletionOption) ||
                          parser.isSet(observationNavigationOption) ||
                          parser.isSet(editNavigationOption) ||
-                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(uiOverlayLifecycleOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
+                         parser.isSet(uiClarityOption) || parser.isSet(uiPerformanceOption) || parser.isSet(uiOverlayLifecycleOption) || parser.isSet(gizmoViewportOption) || parser.isSet(upstreamNavigationOption) || parser.isSet(pointStreamingOption) ||
                          parser.isSet(coordinateSceneOption) ||
                          parser.isSet(trainingPerformanceOption) ||
                          parser.isSet(qualityComparisonOption) ||
@@ -536,6 +542,30 @@ int main(int argc, char *argv[]) {
   }
   const bool backgroundSmoke = smokeTest &&
       qEnvironmentVariable("GSW_SMOKE_BACKGROUND") == QStringLiteral("1");
+  if (smokeTest && qEnvironmentVariableIsSet("GSW_UI_SURFACE_EVIDENCE")) {
+    const QString base = qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE");
+    const QString evidence = QDir(base).filePath(QStringLiteral("process-%1")
+        .arg(QCoreApplication::applicationPid()));
+    if (!gsw::installUiSurfaceEvidence(evidence, qEnvironmentVariable("GSW_UI_SOURCE_COMMIT"))) {
+      qCritical() << "Remote UI surface evidence requires fresh isolated real Windows smoke context";
+      return 2;
+    }
+  }
+  if (smokeTest && qEnvironmentVariable("GITHUB_ACTIONS") == QStringLiteral("true") &&
+      qEnvironmentVariableIntValue("GSW_UI_QA_TRACE") == 1) {
+    if (auto *viewport = window.findChild<gsw::NativeViewport *>())
+      viewport->setUiRasterTraceEnabled(true);
+  }
+  if (smokeTest && qEnvironmentVariable("GITHUB_ACTIONS") == QStringLiteral("true") &&
+      qEnvironmentVariableIntValue("GSW_UI_QA_GRAYSCALE_TEXT") == 1) {
+    if (auto *viewport = window.findChild<gsw::NativeViewport *>())
+      viewport->setUiRasterGrayscaleTextProbe(true);
+  }
+  if (smokeTest && qEnvironmentVariableIsSet("GSW_UI_CRASH_DIR") &&
+      !gsw::installUiCrashDiagnostics(qEnvironmentVariable("GSW_UI_CRASH_DIR"))) {
+    qCritical() << "Remote owned crash diagnostics refused setup";
+    return 2;
+  }
   if (backgroundSmoke) {
     // Explicit QA only: never activate an interactive user's window or use
     // their saved geometry. The ordinary application path is unchanged.
@@ -546,16 +576,9 @@ int main(int argc, char *argv[]) {
     window.move(-30000, -30000);
   }
   if (parser.isSet(uiPerformanceOption)) {
-    // Fix the test-owned viewport before its first observed paint too. Cold
-    // startup A/B samples must not silently use unrelated shell dimensions.
-    for (auto *dock : window.findChildren<QDockWidget *>()) dock->hide();
-    for (auto *bar : window.findChildren<QToolBar *>()) bar->hide();
-    window.setMinimumSize(0, 0);
-    if (auto *viewport = window.findChild<gsw::NativeViewport *>()) {
-      viewport->setFixedSize(640, 360);
-      window.adjustSize();
+    if (!gsw::prepareUiPerformanceWindow(window)) return 2;
+    if (auto *viewport = window.findChild<gsw::NativeViewport *>())
       viewport->setUiPaintObservationEnabled(true);
-    }
   }
   window.show();
   if (!smokeTest && !gsw::setManagedTaskbarRelaunch(
@@ -574,7 +597,13 @@ int main(int argc, char *argv[]) {
   }
   bool smokeTestCompleted = !smokeTest;
   int smokeTestFailureCode = 2;
-  if (parser.isSet(uiOverlayLifecycleOption)) {
+  if (parser.isSet(gizmoViewportOption)) {
+    QTimer::singleShot(650, &application, [&]() {
+      auto *viewport = window.findChild<gsw::NativeViewport *>();
+      smokeTestCompleted = viewport && gsw::runGizmoViewportSmokeTest(*viewport);
+      application.exit(smokeTestCompleted ? 0 : 2);
+    });
+  } else if (parser.isSet(uiOverlayLifecycleOption)) {
     QTimer::singleShot(650, &application, [&]() {
       auto *viewport = window.findChild<gsw::NativeViewport *>();
       smokeTestCompleted = viewport && gsw::runUiOverlayLifecycleSmokeTest(*viewport);

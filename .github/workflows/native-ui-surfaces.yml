@@ -1,0 +1,199 @@
+name: Native UI Surfaces
+
+# Focused real-window evidence. This does not replace the complete native suite,
+# navigation pixel oracle, paired performance gate or installation acceptance.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Foundation checks icons/shell; forms also requires the sixteen dialog classes
+        required: true
+        default: forms
+        type: choice
+        options: [foundation, forms]
+      full_icon_dpr_matrix:
+        description: Capture the five declared DPR groups (core-only stays explicitly partial)
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  surfaces:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      QT_FORCE_STDERR_LOGGING: '1'
+      QT_LOGGING_TO_CONSOLE: '1'
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create fresh test-owned evidence root
+        shell: pwsh
+        env:
+          UI_SURFACE_SCOPE: ${{ inputs.scope }}
+          UI_SURFACE_FULL_DPR: ${{ inputs.full_icon_dpr_matrix }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'gsw-ui-surfaces'
+          if(Test-Path -LiteralPath $root){throw 'Evidence root must be fresh; never overwrite a prior run.'}
+          New-Item -ItemType Directory -Path $root | Out-Null
+          "GSW_UI_SURFACE_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $head=(git rev-parse HEAD).Trim()
+          if($head -cne $env:GITHUB_SHA){throw 'Unexpected source commit.'}
+          [ordered]@{schema='gsw.ui_surface_run/1';sourceCommit=$head;sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
+            runId=$env:GITHUB_RUN_ID;scope=$env:UI_SURFACE_SCOPE;fullIconDprMatrix=($env:UI_SURFACE_FULL_DPR -eq 'true');
+            status='NOT_RUN';batches=@();recordedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6|
+            Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Validate native boundaries, translations and evidence checker contracts
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -m pip install -r scripts/requirements-native-checks.txt
+          if($LASTEXITCODE -ne 0){throw 'QA dependencies failed.'}
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_backend.py --root .
+          if($LASTEXITCODE -ne 0){throw 'Native boundary validation failed.'}
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/native_i18n.py
+          if($LASTEXITCODE -ne 0){throw 'Three-language validation failed.'}
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_surface_evidence.py 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_SURFACE_ROOT/checker-contracts.log"
+          if($LASTEXITCODE -ne 0){throw 'Independent surface evidence checker contracts failed.'}
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build only the selected real-window and style targets
+        shell: pwsh
+        env:
+          UI_SURFACE_SCOPE: ${{ inputs.scope }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $PWD 'native/.deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$root/installed" "--x-buildtrees-root=$root/buildtrees" `
+            "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
+          if($LASTEXITCODE -ne 0){throw 'Native codec build failed.'}
+          $date=(Get-Content native/build_manifest.json -Raw|ConvertFrom-Json).releaseDate
+          cmake -S native -B native/build-ui-surfaces -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON `
+            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            "-DGSW_UI_SURFACE_CAPTURE_ROOT=$env:GSW_UI_SURFACE_ROOT/standalone-surfaces" `
+            '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$root/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          if($LASTEXITCODE -ne 0){throw 'Focused UI configure failed.'}
+          $targets=@('GaussianSceneWorkbench','gsw_process_output_fixture','gsw_app_theme_tests','gsw_ui_visual_role_tests')
+          if($env:UI_SURFACE_SCOPE -eq 'forms'){
+            $targets+=@('gsw_initialization_dialog_ui_tests','gsw_runtime_decoupling_ui_tests')
+          }
+          cmake --build native/build-ui-surfaces --config Release --parallel --target @targets 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_SURFACE_ROOT/build.log"
+          if($LASTEXITCODE -ne 0){throw 'Focused UI build failed.'}
+          [ordered]@{sourceCommit=$env:GITHUB_SHA;targets=$targets;buildConfiguration='Release';
+            executableSha256=(Get-FileHash 'native/build-ui-surfaces/Release/Gaussian Scene Workbench.exe').Hash.ToLowerInvariant()}|
+            ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$env:GSW_UI_SURFACE_ROOT/build.json" -Encoding utf8
+      - name: Prepare isolated remote Windows display and software OpenGL
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Execute original CTest contracts and collect exposed owned surfaces
+        shell: pwsh
+        env:
+          UI_SURFACE_SCOPE: ${{ inputs.scope }}
+          UI_SURFACE_FULL_DPR: ${{ inputs.full_icon_dpr_matrix }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$false
+          if($env:GITHUB_ACTIONS -cne 'true'){throw 'Real UI execution is remote-only.'}
+          $root=$env:GSW_UI_SURFACE_ROOT
+          $manifest=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json -AsHashtable
+          $env:PATH="$env:QT_ROOT_DIR/bin;$env:PATH"
+          $env:QT_PLUGIN_PATH="$env:QT_ROOT_DIR/plugins"
+          $env:QT_QPA_PLATFORM='windows'
+          $env:QT_OPENGL='software'
+          $env:GSW_UI_SOURCE_COMMIT=$env:GITHUB_SHA
+          Remove-Item Env:GSW_SMOKE_BACKGROUND -ErrorAction SilentlyContinue
+          Remove-Item Env:GSW_RENDER_DIAGNOSTICS_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:GSW_RENDER_DIAGNOSTICS_SMOKE -ErrorAction SilentlyContinue
+          $locales=@('zh_CN','en_US','ja_JP')
+          $iconDprs=@(if($env:UI_SURFACE_FULL_DPR -eq 'true'){@('1','1.25','1.5','1.75','2')}else{@('1')})
+          $plan=@(@{id='style-contracts';dpr='1';tests=@('app_theme','ui_visual_roles')})
+          foreach($dpr in $iconDprs){
+            $plan+=@{id=('icons-d'+$dpr);dpr=$dpr;tests=@($locales|ForEach-Object {'native_icon_ui_'+$_})}
+          }
+          if($env:UI_SURFACE_SCOPE -eq 'forms'){
+            $plan+=@{id='forms-core';dpr='1';tests=@(
+              'native_language_zh_CN','native_language_en_US','native_language_ja_JP',
+              'native_task_actions_zh_CN','native_task_actions_en_US','native_task_actions_ja_JP',
+              'native_generation_history','native_resource_budget_ui','native_quality_comparison_ui',
+              'native_quality_measurement_ui','native_scale_constraints_ui','native_training_batch_ui',
+              'native_viewport_scheduling_light','native_viewport_scheduling_dark',
+              'native_runtime_ui_surfaces','native_initialization_ui_surfaces')}
+          }
+          $manifest['plannedBatches']=$plan
+          $manifest['iconDprs']=$iconDprs
+          $manifest['status']='RUNNING'
+          $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          foreach($batch in $plan){
+            $case=Join-Path $root $batch.id
+            New-Item -ItemType Directory -Path $case | Out-Null
+            # Adapter owns only absent process-PID subdirectories; this base is
+            # intentionally created beforehand as its existing, owned parent.
+            $env:GSW_UI_SURFACE_EVIDENCE=Join-Path $case 'surfaces'
+            New-Item -ItemType Directory -Path $env:GSW_UI_SURFACE_EVIDENCE | Out-Null
+            $env:GSW_SMOKE_OUTPUT_DIR=Join-Path $case 'original-png'
+            $env:GSW_LANGUAGE_SCREENSHOT_DIR=$env:GSW_SMOKE_OUTPUT_DIR
+            New-Item -ItemType Directory -Path $env:GSW_SMOKE_OUTPUT_DIR | Out-Null
+            $env:QT_SCALE_FACTOR=[string]$batch.dpr
+            $regex='^('+ (($batch.tests|ForEach-Object {[regex]::Escape($_)}) -join '|') +')$'
+            $junit=Join-Path $case 'ctest.xml'
+            $log=Join-Path $case 'ctest.log'
+            # No --timeout override, skipped assertions or --stop-on-failure:
+            # preserve original per-test deadlines and collect every result.
+            ctest --test-dir native/build-ui-surfaces -C Release --parallel 1 --no-tests=error `
+              --output-on-failure --verbose --output-junit $junit --output-log $log -R $regex
+            $code=$LASTEXITCODE
+            $manifest['batches']+=@{id=$batch.id;dpr=$batch.dpr;expectedTests=$batch.tests;
+              exitCode=$code;junit=($batch.id+'/ctest.xml');log=($batch.id+'/ctest.log')}
+            $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          }
+          $manifest['status']='FINISHED'
+          $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+      - name: Index only test-owned PNG bytes and assess actual evidence coverage
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(-not $env:GSW_UI_SURFACE_ROOT -or -not (Test-Path -LiteralPath "$env:GSW_UI_SURFACE_ROOT/source-run.json")){
+            throw 'No source-bound evidence manifest exists; no acceptance can be claimed.'
+          }
+          $root=[IO.Path]::GetFullPath($env:GSW_UI_SURFACE_ROOT)
+          $index=@(Get-ChildItem -LiteralPath $root -Filter '*.png' -Recurse -File|ForEach-Object {
+            @{path=[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()}
+          })
+          @{schema='gsw.ui_surface_png_index/1';sourceCommit=$env:GITHUB_SHA;images=$index}|ConvertTo-Json -Depth 5|
+            Set-Content -LiteralPath "$root/png-index.json" -Encoding utf8
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/check_native_ui_surface_evidence.py `
+            --root $root --source-commit $env:GITHUB_SHA `
+            --inventory docs/ui_upgrade_20261028/SURFACE_INVENTORY.json --output "$root/surface-results.json"
+          if($LASTEXITCODE -eq 3){throw 'Surface evidence is PARTIAL/NOT_RUN. Missing combinations remain explicit; this is not full visual acceptance.'}
+          if($LASTEXITCODE -ne 0){throw 'Surface evidence integrity or original CTest behavior failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-ui-surfaces-${{ inputs.scope }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/gsw-ui-surfaces
+          if-no-files-found: error
+          retention-days: 14

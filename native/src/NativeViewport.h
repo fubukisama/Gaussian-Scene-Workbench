@@ -237,6 +237,15 @@ public:
   [[nodiscard]] const UiPaintObservation &uiPaintObservation() const {
     return mUiPaintObservation;
   }
+  void setUiRasterTraceEnabled(bool enabled) {
+    mUiRasterTraceEnabled = enabled;
+    mNavigationCoverage.setTraceEnabled(enabled);
+    mTransformCoverage.setTraceEnabled(enabled);
+  }
+  void setUiRasterGrayscaleTextProbe(bool enabled) {
+    mNavigationCoverage.setGrayscaleTextProbe(enabled);
+    mTransformCoverage.setGrayscaleTextProbe(enabled);
+  }
   [[nodiscard]] QVector3D viewTarget() const { return mTarget; }
   [[nodiscard]] float viewDistance() const { return mDistance; }
   [[nodiscard]] OrbitAngles viewOrbitAngles() const {
@@ -663,6 +672,8 @@ private:
   quint64 mPresentedFrameSerial = 0;
   UiPaintObservation mUiPaintObservation;
   UiOverlayRaster mNavigationCoverage;
+  UiOverlayRaster mTransformCoverage;
+  bool mUiRasterTraceEnabled = false;
   QSet<QString> mProcessingReferenceSelection;
   bool mProcessingReferenceSelected = false;
   bool mProcessingPreviewVisible = false;

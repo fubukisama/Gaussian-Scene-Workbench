@@ -242,13 +242,15 @@ void setWorkbenchTreeIcon(QTreeWidgetItem *item, const WorkbenchIconId id,
 }
 
 QColor taskStateColor(const QString &state) {
-  const bool light = AppTheme::currentTheme() == UiTheme::Light;
-  if (state == QStringLiteral("running") || state == QStringLiteral("done"))
-    return light ? QColor(16, 94, 66) : QColor(102, 193, 168);
+  const auto theme = AppTheme::currentTheme();
+  if (state == QStringLiteral("running"))
+    return AppTheme::color(theme, UiColorRole::ActionInk);
+  if (state == QStringLiteral("done"))
+    return AppTheme::color(theme, UiColorRole::Success);
   if (state == QStringLiteral("cancelled") || state == QStringLiteral("paused"))
-    return light ? QColor(119, 69, 9) : QColor(218, 169, 82);
+    return AppTheme::color(theme, UiColorRole::Warning);
   if (state == QStringLiteral("failed"))
-    return light ? QColor(150, 33, 33) : QColor(211, 95, 95);
+    return AppTheme::color(theme, UiColorRole::Danger);
   return qApp->palette().color(QPalette::Text);
 }
 
@@ -2496,6 +2498,7 @@ void MainWindow::createInspectorDock() {
 
   layout->addWidget(createSectionTitle(AppLanguage::source("工程"), panel));
   auto *projectForm = new QFormLayout();
+  projectForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
   projectForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   projectForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
   projectForm->setHorizontalSpacing(12);
@@ -2512,6 +2515,7 @@ void MainWindow::createInspectorDock() {
 
   layout->addWidget(createSectionTitle(AppLanguage::source("数据集"), panel));
   auto *datasetForm = new QFormLayout();
+  datasetForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
   datasetForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   datasetForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
   datasetForm->setHorizontalSpacing(12);
@@ -2536,6 +2540,7 @@ void MainWindow::createInspectorDock() {
 
   layout->addWidget(createSectionTitle(AppLanguage::source("场景"), panel));
   auto *sceneForm = new QFormLayout();
+  sceneForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
   sceneForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   sceneForm->setLabelAlignment(Qt::AlignLeft | Qt::AlignTop);
   sceneForm->setHorizontalSpacing(12);

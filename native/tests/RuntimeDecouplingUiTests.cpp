@@ -3,6 +3,7 @@
 #include "RuntimeGuardDialog.h"
 #include "ExistingTrainingDialog.h"
 #include "TrainingMonitorWidget.h"
+#include "UiFormVisualProbe.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -32,13 +33,17 @@
 
 int main(int argc, char **argv) {
   std::setvbuf(stdout,nullptr,_IONBF,0);
-  qputenv("QT_QPA_PLATFORM", "offscreen");
+  const bool visualForms=gsw::tests::uiFormsRequested(argc,argv);
+  if(!gsw::tests::configureUiFormsPlatform(visualForms)){
+    std::fprintf(stderr,"UI forms visual mode requires GITHUB_ACTIONS=true on Windows.\n");return 2;
+  }
   std::fprintf(stderr,"Runtime UI bootstrap: QApplication\n");std::fflush(stderr);
   QApplication app(argc, argv);
   std::fprintf(stderr,"Runtime UI bootstrap: QApplication ready\n");std::fflush(stderr);
   app.setOrganizationName(QStringLiteral("GSW-owned-runtime-ui-probe"));
   app.setApplicationName(QStringLiteral("GSW-owned-runtime-ui-probe"));
-  const auto arguments=app.arguments();
+  auto arguments=app.arguments();
+  arguments.removeAll(QStringLiteral("--smoke-test-ui-forms"));
   if(arguments.size()!=4){std::fprintf(stderr,"usage: RuntimeDecouplingUiTests <repository> <python> <owned-fixture-script>\n");return 2;}
   const QString repository=QFileInfo(arguments.at(1)).absoluteFilePath();
   const QString python=QFileInfo(arguments.at(2)).absoluteFilePath();
@@ -49,6 +54,9 @@ int main(int argc, char **argv) {
   if (!temporary.isValid()) return 2;
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
+  if(!gsw::tests::installUiFormsEvidence(app,visualForms,temporary.path())){
+    std::fprintf(stderr,"UI forms evidence installation refused; preserve the existing evidence root.\n");return 2;
+  }
   gsw::AppLanguage::apply(QStringLiteral("zh_CN"), false);
   std::fprintf(stderr,"Runtime UI bootstrap: language ready\n");std::fflush(stderr);
   gsw::TrainingDialog dialog(temporary.path(), QStringLiteral("generated UI fixture"), temporary.path(), true, true);
@@ -194,6 +202,11 @@ int main(int argc, char **argv) {
     const QJsonObject originalGuard{{"enabled",true},{"mode","pause"},{"usage_fraction",0.901234567891},{"minimum_spare_mib",1001},{"max_consecutive_denials",17}};
     gsw::RuntimeGuardDialog resume(originalGuard);
     check(resume.configuration()==originalGuard,"guard-only resume editor preserves the exact unedited fraction and all five original values");
+    // Standalone editor evidence only: this does not exercise MainWindow's
+    // nested checkpoint-trust/resume prompt or claim that a trainer resumed.
+    check(gsw::tests::captureUiFormMatrix(visualForms,resume,QStringLiteral("guard-original"),
+        QSize(620,390),QSize(360,460),[&]{return QJsonObject{{"configuration",resume.configuration()}};}),
+        "owned guard editor native surface matrix retains the exact original guard configuration");
     auto *enabled=resume.findChild<QCheckBox*>(QStringLiteral("resumeResourceGuard"));
     auto *target=resume.findChild<QDoubleSpinBox*>(QStringLiteral("resumeGuardMemoryPercent"));
     auto *spareControl=resume.findChild<QSpinBox*>(QStringLiteral("resumeGuardMinimumSpareMiB"));
@@ -210,6 +223,9 @@ int main(int argc, char **argv) {
     auto invalid=originalGuard;invalid["usage_fraction"]=1.2;gsw::RuntimeGuardDialog rejected(invalid);
     auto *accept=rejected.findChild<QPushButton*>(QStringLiteral("resumeGuardAccept"));
     check(accept&&!accept->isEnabled()&&rejected.configuration()==invalid,"invalid input is refused without silently clamping and replacing the original request");
+    check(gsw::tests::captureUiFormMatrix(visualForms,rejected,QStringLiteral("guard-invalid"),
+        QSize(620,390),QSize(360,460),[&]{return QJsonObject{{"configuration",rejected.configuration()}};}),
+        "owned invalid guard editor native surface matrix preserves its refused original document");
   }
   {
     const QString store=temporary.filePath(QStringLiteral("jobs"));QDir().mkpath(store);
@@ -240,6 +256,10 @@ int main(int argc, char **argv) {
     QSet<QString> statusTexts,observerTitles;const auto inspected=observer.currentReport();
     for(const auto &locale:gsw::AppLanguage::supported()){gsw::AppLanguage::apply(locale,false);statusTexts.insert(state->text());observerTitles.insert(observer.windowTitle());check(observer.currentReport()==inspected&&jobs->currentData().toString()==id&&observer.isConnected(),"observer locale changes retain the selected identity, connection and raw report");}
     check(statusTexts.size()==3&&observerTitles.size()==3,"observer liveness and dialog titles translate immediately in three languages");
+    check(gsw::tests::captureUiFormMatrix(visualForms,observer,QStringLiteral("observer-unverified"),
+        QSize(840,760),QSize(420,620),[&]{return QJsonObject{{"report",observer.currentReport()},
+          {"connected",observer.isConnected()},{"selectedJob",jobs->currentData().toString()}};}),
+        "owned unverified observer native surface matrix retains report, identity and connection without authorizing controls");
     observer.disconnectJob();jobFile.open(QIODevice::ReadOnly);check(jobFile.readAll()==originalBytes,"inspect, locale switch and detach do not mutate the recorded running job");jobFile.close();
     QProcess owned;owned.setProcessEnvironment(env);owned.setWorkingDirectory(repository);
     owned.start(python,{QStringLiteral("-B"),fixtureScript,QStringLiteral("--store"),store,QStringLiteral("--job-id"),id});
@@ -298,6 +318,10 @@ int main(int argc, char **argv) {
     check(pauseAcknowledged&&owned.exitStatus()==QProcess::NormalExit&&owned.exitCode()==0,
         "pause acknowledgement comes from a cleanly exited owned fixture, not a crashed or merely closed lease");
     check(observer.currentReport().value("liveness").toString()==QStringLiteral("ended")&&!resume->isEnabled(),"ended session without a complete checkpoint is not presented as optimizer-state resumable");
+    check(gsw::tests::captureUiFormMatrix(visualForms,observer,QStringLiteral("observer-ended"),
+        QSize(840,760),QSize(420,620),[&]{return QJsonObject{{"report",observer.currentReport()},
+          {"connected",observer.isConnected()},{"selectedJob",jobs->currentData().toString()}};}),
+        "owned ended observer native surface matrix preserves the non-resumable report after the original CPU pause contract");
     observer.close();check(!observer.isConnected()&&!observer.isBusy(),"closing observer releases only its own helpers and connection");
     if(owned.state()!=QProcess::NotRunning){owned.kill();owned.waitForFinished(1000);}
     const QString fakeRoot=temporary.filePath(QStringLiteral("owned-helper-boundary"));
@@ -350,5 +374,6 @@ int main(int argc, char **argv) {
     check(plan.readAll()==planBytes&&stateFile.readAll()==stateBytes&&!QFileInfo::exists(QDir(batchRoot).filePath(".coordinator.json")),"closing batch observation keeps original queue bytes and creates no coordinator");
   }
   std::printf("Runtime UI checks: %d; result: %s\n",checks,passed?"PASS":"FAIL");
+  gsw::tests::finishUiFormsEvidence(app,visualForms);
   return passed?0:1;
 }

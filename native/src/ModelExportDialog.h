@@ -9,6 +9,7 @@ class QLabel;
 
 namespace gsw {
 class ModelExportDialog final : public QDialog {
+  Q_OBJECT
 public:
   ModelExportDialog(const ModelExportOptions &source, bool mesh, bool gaussian,
                     const QStringList &protectedPaths, QWidget *parent = nullptr);

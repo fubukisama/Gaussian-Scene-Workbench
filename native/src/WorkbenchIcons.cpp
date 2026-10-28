@@ -45,25 +45,17 @@ std::shared_ptr<QSvgRenderer> rendererFor(const WorkbenchIconId id, const QColor
 
 class WorkbenchIconEngine final : public QIconEngine {
 public:
-  WorkbenchIconEngine(WorkbenchIconId id, const QPalette &palette, bool accent)
-      : mId(id), mPalette(palette), mAccent(accent) {}
-  QIconEngine *clone() const override { return new WorkbenchIconEngine(mId, mPalette, mAccent); }
+  WorkbenchIconEngine(WorkbenchIconId id, const QPalette &palette, bool accent,
+                      WorkbenchIconSurface surface)
+      : mId(id), mPalette(palette), mAccent(accent), mSurface(surface) {}
+  QIconEngine *clone() const override { return new WorkbenchIconEngine(mId, mPalette, mAccent, mSurface); }
   QString key() const override { return QStringLiteral("gsw-lucide"); }
   QString iconName() override { return workbenchIconAssetName(mId); }
   bool isNull() override { return !rendererFor(mId, mPalette.color(QPalette::WindowText)); }
   QSize actualSize(const QSize &size, QIcon::Mode, QIcon::State) override { return size; }
   void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override {
-    QColor ink;
-    if (mode == QIcon::Disabled) ink = mPalette.color(QPalette::Disabled, QPalette::WindowText);
-    // GSW selected rows/menus keep a tinted background and normal text, not
-    // Qt's solid highlight. Match that foreground instead of turning white.
-    else if (mode == QIcon::Selected) ink = mPalette.color(QPalette::WindowText);
-    else if (state == QIcon::On) {
-      const bool light = mPalette.color(QPalette::Window).lightnessF() > 0.5;
-      ink = mPalette.color(light ? QPalette::Highlight : QPalette::WindowText);
-    }
-    else ink = mPalette.color(mAccent ? QPalette::Highlight : QPalette::WindowText);
-    paintWorkbenchIcon(*painter, mId, rect, ink);
+    paintWorkbenchIcon(*painter, mId, rect,
+                       workbenchIconInk(mPalette, mode, state, mAccent, mSurface));
   }
   QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State state) override {
     return scaledPixmap(size, mode, state, 1.0);
@@ -80,6 +72,7 @@ private:
   WorkbenchIconId mId;
   QPalette mPalette;
   bool mAccent;
+  WorkbenchIconSurface mSurface;
 };
 } // namespace
 
@@ -88,8 +81,23 @@ QString workbenchIconAssetName(const WorkbenchIconId id) {
   return index < assets.size() ? QString::fromLatin1(assets[index]) : QString();
 }
 
-QIcon workbenchIcon(const WorkbenchIconId id, const QPalette &palette, const bool accent) {
-  return QIcon(new WorkbenchIconEngine(id, palette, accent));
+QColor workbenchIconInk(const QPalette &palette, const QIcon::Mode mode,
+                        const QIcon::State state, const bool accent,
+                        const WorkbenchIconSurface surface) {
+  if (mode == QIcon::Disabled)
+    return palette.color(QPalette::Disabled, QPalette::WindowText);
+  if (surface == WorkbenchIconSurface::OnAccent)
+    return palette.color(QPalette::HighlightedText);
+  // Selected rows/menus remain tinted with ordinary readable ink. Checked
+  // controls use the palette's readable action ink, never blanket white.
+  if (mode == QIcon::Selected) return palette.color(QPalette::WindowText);
+  if (state == QIcon::On || accent) return palette.color(QPalette::Link);
+  return palette.color(QPalette::WindowText);
+}
+
+QIcon workbenchIcon(const WorkbenchIconId id, const QPalette &palette, const bool accent,
+                    const WorkbenchIconSurface surface) {
+  return QIcon(new WorkbenchIconEngine(id, palette, accent, surface));
 }
 
 void paintWorkbenchIcon(QPainter &painter, const WorkbenchIconId id,

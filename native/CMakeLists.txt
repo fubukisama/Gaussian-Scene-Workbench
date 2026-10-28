@@ -115,6 +115,13 @@ qt_add_executable(GaussianSceneWorkbench WIN32
   src/UiOverlayLifecycleSmokeTest.h
   src/UiOverlayRaster.h
   src/NavigationOverlayKey.h
+  src/TransformOverlayKey.h
+  src/UiSurfaceEvidence.cpp
+  src/UiSurfaceEvidence.h
+  src/GizmoViewportSmokeTest.cpp
+  src/GizmoViewportSmokeTest.h
+  src/UiCrashDiagnostics.cpp
+  src/UiCrashDiagnostics.h
   tests/BlenderViewportVisualTests.cpp
   tests/BlenderViewportVisualTests.h
   tests/BlenderViewportVisualTestSupport.cpp
@@ -489,9 +496,12 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_clarity.py
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_clarity.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_performance.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_performance.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_native_ui_surface_evidence.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_native_ui_surface_evidence.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/run_native_ui_performance.ps1" DESTINATION source/scripts)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-clarity.yml"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-performance.yml" DESTINATION source/.github/workflows)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-performance.yml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/native-ui-surfaces.yml" DESTINATION source/.github/workflows)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/ui_upgrade_20261028" DESTINATION source/docs)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/stage_native_readme.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test_stage_native_readme.py"
@@ -584,6 +594,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../docs/examples/camera-scale-p1"
 include(CTest)
 if(BUILD_TESTING)
   if(WIN32)
+    execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+      OUTPUT_VARIABLE GSW_UI_SURFACE_SOURCE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE)
     set(GSW_UI_CLARITY_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-clarity-evidence" CACHE PATH
       "Fresh owned UI capture namespace; choose a new directory for a legitimate repeat")
     add_test(NAME native_ui_clarity_capture
@@ -599,6 +611,12 @@ if(BUILD_TESTING)
     add_test(NAME native_ui_overlay_lifecycle COMMAND GaussianSceneWorkbench --smoke-test-ui-overlay-lifecycle)
     set_tests_properties(native_ui_overlay_lifecycle PROPERTIES TIMEOUT 30
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;QT_FORCE_STDERR_LOGGING=1"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    set(GSW_GIZMO_VIEWPORT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/gizmo-viewport-evidence" CACHE PATH
+      "Fresh owned real manipulation input evidence namespace")
+    add_test(NAME native_gizmo_viewport COMMAND GaussianSceneWorkbench --smoke-test-gizmo-viewport)
+    set_tests_properties(native_gizmo_viewport PROPERTIES TIMEOUT 90
+      ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_GIZMO_VIEWPORT_EVIDENCE=${GSW_GIZMO_VIEWPORT_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};QT_FORCE_STDERR_LOGGING=1"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
   if(WIN32)
@@ -690,7 +708,8 @@ if(BUILD_TESTING)
   qt_add_executable(gsw_initialization_dialog_ui_tests
     tests/InitializationDialogUiTests.cpp src/InitializationEditor.cpp src/InitializationEditor.h
     src/InitializationPreview.cpp src/InitializationPreview.h src/InitializationDialog.cpp src/InitializationDialog.h
-    src/AppLanguage.cpp src/AppLanguage.h)
+    src/AppLanguage.cpp src/AppLanguage.h src/AppTheme.cpp src/AppTheme.h
+    src/UiSurfaceEvidence.cpp src/UiSurfaceEvidence.h tests/UiFormVisualProbe.h)
   target_link_libraries(gsw_initialization_dialog_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data")
   foreach(target gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests)
@@ -709,6 +728,16 @@ if(BUILD_TESTING)
   set_tests_properties(native_initialization_editor_ui native_initialization_dialog_ui PROPERTIES TIMEOUT 180
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  if(WIN32)
+    set(GSW_UI_SURFACE_CAPTURE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-surface-evidence" CACHE PATH
+      "Owned remote native form evidence parent, retained per-process subdirectories")
+    file(MAKE_DIRECTORY "${GSW_UI_SURFACE_CAPTURE_ROOT}")
+    add_test(NAME native_initialization_ui_surfaces COMMAND gsw_initialization_dialog_ui_tests
+      "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}" --smoke-test-ui-forms)
+    set_tests_properties(native_initialization_ui_surfaces PROPERTIES TIMEOUT 180
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   qt_add_executable(gsw_mesh_geometry_dialog_ui_tests tests/MeshGeometryDialogUiTests.cpp
     src/MeshGenerationDialog.cpp src/MeshGenerationDialog.h src/CameraDatasetInfo.cpp src/CameraDatasetInfo.h
     src/WorkspaceDocument.cpp src/WorkspaceDocument.h src/AppLanguage.cpp src/AppLanguage.h)
@@ -848,7 +877,8 @@ if(BUILD_TESTING)
     src/ProcessSupervisor.cpp src/ProcessSupervisor.h
     src/TrainingOutputLocator.cpp src/TrainingOutputLocator.h
     src/TrainingGpuPreviewProtocol.cpp src/TrainingGpuPreviewProtocol.h
-    src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h)
+    src/AppTheme.cpp src/AppTheme.h src/AppLanguage.cpp src/AppLanguage.h
+    src/UiSurfaceEvidence.cpp src/UiSurfaceEvidence.h tests/UiFormVisualProbe.h)
   target_include_directories(gsw_runtime_decoupling_ui_tests PRIVATE src)
   target_link_libraries(gsw_runtime_decoupling_ui_tests PRIVATE Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Widgets)
   target_link_libraries(gsw_runtime_decoupling_ui_tests PRIVATE gsw_native_language_resources)
@@ -866,6 +896,14 @@ if(BUILD_TESTING)
   set_tests_properties(native_runtime_decoupling_ui PROPERTIES TIMEOUT 120
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  if(WIN32)
+    add_test(NAME native_runtime_ui_surfaces COMMAND gsw_runtime_decoupling_ui_tests
+      "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/helpers/OwnedTrainingConnectionFixture.py" --smoke-test-ui-forms)
+    set_tests_properties(native_runtime_ui_surfaces PROPERTIES TIMEOUT 120
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime-test-data;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   # Exercise the same public batch smoke without a MainWindow or training
   # process, so admission/observation regressions fail quickly in every locale.
   qt_add_executable(gsw_training_batch_ui_tests tests/TrainingBatchUiTests.cpp
@@ -2024,6 +2062,27 @@ if(BUILD_TESTING)
     set_tests_properties(native_quality_mip_viewport PROPERTIES TIMEOUT 60
       ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_QPA_PLATFORM=windows;GSW_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/quality-mip-test-data"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
+    qt_add_executable(gsw_ui_visual_role_tests tests/UiVisualRoleTests.cpp
+      src/AppTheme.cpp src/AppTheme.h src/WorkbenchIcons.cpp src/WorkbenchIcons.h lucide_icons.qrc)
+    target_include_directories(gsw_ui_visual_role_tests PRIVATE src)
+    target_link_libraries(gsw_ui_visual_role_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_ui_visual_role_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ui_visual_roles COMMAND gsw_ui_visual_role_tests)
+    set_tests_properties(ui_visual_roles PROPERTIES TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=windows"
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
+
+    qt_add_executable(gsw_transform_overlay_key_tests tests/TransformOverlayKeyTests.cpp src/TransformOverlayKey.h)
+    target_include_directories(gsw_transform_overlay_key_tests PRIVATE src)
+    target_link_libraries(gsw_transform_overlay_key_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+    if(MSVC)
+      target_compile_options(gsw_transform_overlay_key_tests PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME transform_overlay_key COMMAND gsw_transform_overlay_key_tests)
+    set_tests_properties(transform_overlay_key PROPERTIES TIMEOUT 20
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Gui>")
 
     qt_add_executable(gsw_ui_overlay_raster_tests tests/UiOverlayRasterTests.cpp src/UiOverlayRaster.h)
     target_include_directories(gsw_ui_overlay_raster_tests PRIVATE src)

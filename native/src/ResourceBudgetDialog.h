@@ -10,6 +10,7 @@ class QLabel;
 namespace gsw {
 class NativeViewport;
 class ResourceBudgetDialog final : public QDialog {
+  Q_OBJECT
 public:
   explicit ResourceBudgetDialog(NativeViewport *viewport, QWidget *parent = nullptr);
 

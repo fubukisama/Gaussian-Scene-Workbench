@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QSize>
 #include <QString>
 #include <QPalette>
@@ -27,6 +28,67 @@ enum class UiThemeMode {
   Light,
 };
 
+// Shared chrome roles. Viewport backgrounds and XYZ/domain colors remain
+// owned by their existing renderers, not this UI palette.
+enum class UiColorRole {
+  Panel,
+  Window,
+  Chrome,
+  Field,
+  Menu,
+  ItemView,
+  AlternateItem,
+  Header,
+  DockTitle,
+  Button,
+  ButtonHover,
+  DisabledSurface,
+  Text,
+  MutedText,
+  DisabledText,
+  HeaderText,
+  DockTitleText,
+  TabText,
+  ActiveTabText,
+  LogSurface,
+  LogText,
+  LineSubtle,
+  FieldLine,
+  ButtonLine,
+  HeaderLine,
+  DockTitleLine,
+  TabLine,
+  SeparatorLine,
+  DisabledLine,
+  Hover,
+  HoverLine,
+  ItemHover,
+  Action,
+  ActionTint,
+  ActionPressed,
+  ActionInk,
+  OnAction,
+  Focus,
+  DisabledSelection,
+  Progress,
+  LinkVisited,
+  Success,
+  Warning,
+  Danger,
+  ToolTipSurface,
+  ToolTipText,
+  ToolTipLine,
+  ScrollHandle,
+  PaletteLight,
+  PaletteMidlight,
+  PaletteMid,
+  PaletteDark,
+  PaletteShadow,
+  SectionText,
+  SectionLine,
+  Count,
+};
+
 class AppTheme final {
 public:
   static UiThemeMode loadThemeMode();
@@ -34,6 +96,7 @@ public:
   static UiTheme themeForTime(const QTime &localTime);
   static UiTheme loadTheme(const QTime &localTime = QTime::currentTime());
   static UiTheme currentTheme();
+  static QColor color(UiTheme theme, UiColorRole role);
   static QPalette palette(UiTheme theme);
   static void applyTheme(QApplication &application, UiTheme theme, bool persist);
   static void applyThemeMode(QApplication &application, UiThemeMode mode,

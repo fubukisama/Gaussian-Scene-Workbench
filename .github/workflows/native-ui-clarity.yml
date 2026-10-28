@@ -8,7 +8,7 @@ on:
         description: UI acceptance slice
         type: choice
         default: baseline
-        options: [oracle-only, baseline, candidate]
+        options: [oracle-only, baseline, candidate, diagnostic]
 
 permissions:
   contents: read
@@ -63,6 +63,9 @@ jobs:
           & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_performance.py 2>&1 |
             Tee-Object -FilePath "$env:GSW_UI_ROOT/performance-contracts.log"
           if ($LASTEXITCODE -ne 0) { throw 'Performance evaluator contracts failed; no local fallback.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_surface_evidence.py 2>&1 |
+            Tee-Object -FilePath "$env:GSW_UI_ROOT/surface-contracts.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Surface evidence evaluator contracts failed; no local fallback.' }
       - uses: jurplel/install-qt-action@v4
         if: inputs.scope != 'oracle-only'
         with:
@@ -82,8 +85,10 @@ jobs:
             "--x-packages-root=$root/packages" "--downloads-root=$root/downloads"
           if ($LASTEXITCODE -ne 0) { throw 'Codec build failed.' }
           $date = (Get-Content native/build_manifest.json -Raw | ConvertFrom-Json).releaseDate
+          $compileFlags=if('${{ inputs.scope }}' -eq 'diagnostic'){'/MP2 /Zi'}else{'/MP2'}
+          $linkFlags=if('${{ inputs.scope }}' -eq 'diagnostic'){'/DEBUG:FULL'}else{''}
           cmake -S native -B native/build-ui -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON `
-            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
+            "-DCMAKE_CXX_FLAGS=$compileFlags" "-DCMAKE_EXE_LINKER_FLAGS=$linkFlags" -DGSW_TEST_OPENGL_BACKEND=software "-DGSW_RELEASE_DATE=$date" `
             '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$root/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
@@ -98,7 +103,7 @@ jobs:
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
       - name: Capture actual fractional-DPR navigation frames
-        if: inputs.scope != 'oracle-only'
+        if: inputs.scope == 'baseline' || inputs.scope == 'candidate'
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -151,22 +156,69 @@ jobs:
           $captures=@(Get-ChildItem -LiteralPath $env:GSW_UI_ROOT -Filter capture.json -Recurse -File)
           if($captures.Count -ne 20) { throw 'The full frozen DPR/sample/theme capture matrix was not executed.' }
       - name: Evaluate navigation edges and retain all failing cases
-        if: inputs.scope != 'oracle-only'
+        if: inputs.scope == 'baseline' || inputs.scope == 'candidate'
         shell: pwsh
         run: |
           & '${{ steps.qa.outputs.python-path }}' -I -B scripts/check_native_ui_clarity.py `
             --root $env:GSW_UI_ROOT --output "$env:GSW_UI_ROOT/edge-results.json"
           if ($LASTEXITCODE -ne 0) { throw 'Actual navigation edge contract failed; no tolerance relaxation.' }
       - name: Real navigation and camera regressions
-        if: inputs.scope == 'candidate'
+        if: inputs.scope == 'candidate' || inputs.scope == 'diagnostic'
         shell: pwsh
         run: |
           Remove-Item Env:QT_SCALE_FACTOR -ErrorAction SilentlyContinue
           Remove-Item Env:GSW_UI_QA_SAMPLES -ErrorAction SilentlyContinue
+          if ('${{ inputs.scope }}' -eq 'diagnostic') {
+            $env:GSW_UI_QA_TRACE='1'
+            $PSNativeCommandUseErrorActionPreference=$false
+            $results=@()
+            foreach($policy in @('original','grayscale-probe')) {
+              $probe=Join-Path $env:GSW_UI_ROOT $policy
+              New-Item -ItemType Directory -Path $probe | Out-Null
+              $env:GSW_UI_CRASH_DIR=Join-Path $probe 'crashes'
+              New-Item -ItemType Directory -Path $env:GSW_UI_CRASH_DIR | Out-Null
+              if($policy -eq 'grayscale-probe'){$env:GSW_UI_QA_GRAYSCALE_TEXT='1'}else{Remove-Item Env:GSW_UI_QA_GRAYSCALE_TEXT -ErrorAction SilentlyContinue}
+              ctest --test-dir native/build-ui -C Release --no-tests=error --output-on-failure --verbose `
+                --output-log "$probe/navigation.log" `
+                -R '^(native_ui_overlay_lifecycle|native_upstream_navigation_(en_US|ja_JP))$'
+              $results+=@{policy=$policy;exitCode=$LASTEXITCODE;testTimeoutsUnchanged=$true}
+            }
+            $results|ConvertTo-Json|Set-Content -LiteralPath "$env:GSW_UI_ROOT/diagnostic-comparison.json" -Encoding utf8
+            if(@($results|Where-Object exitCode -ne 0).Count){throw 'Preserved diagnostic red signal; inspect both treatment arms and first-chance fault context.'}
+            exit 0
+          }
           ctest --test-dir native/build-ui -C Release --no-tests=error --output-on-failure --verbose `
             --output-log "$env:GSW_UI_ROOT/navigation.log" `
             -R '^(ui_overlay_raster|native_ui_overlay_lifecycle|navigation_gizmo|native_upstream_navigation_(zh_CN|en_US|ja_JP)|native_blender_viewport_presentation_(zh_CN|en_US|ja_JP))$'
           if ($LASTEXITCODE -ne 0) { throw 'Existing actual navigation contract failed.' }
+      - name: Retain diagnostic module identities and available symbols
+        if: always() && inputs.scope == 'diagnostic'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $symbols=Join-Path $env:GSW_UI_ROOT 'symbols'
+          New-Item -ItemType Directory -Path $symbols -Force|Out-Null
+          $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs=(& $vswhere -latest -property installationPath).Trim()
+          $dumpbin=Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" -File|Sort-Object FullName -Descending|Select-Object -First 1
+          if(-not $dumpbin){throw 'Installed MSVC dumpbin not found; no silent symbol identity claim.'}
+          $modules=@('native/build-ui/Release/Gaussian Scene Workbench.exe',"$env:QT_ROOT_DIR/bin/Qt6Gui.dll","$env:QT_ROOT_DIR/bin/Qt6Core.dll","$env:QT_ROOT_DIR/bin/Qt6Widgets.dll")
+          $identities=@()
+          foreach($module in $modules){
+            if(-not(Test-Path -LiteralPath $module)){continue}
+            $file=Get-Item -LiteralPath $module
+            & $dumpbin.FullName /exports $file.FullName|Set-Content -LiteralPath (Join-Path $symbols ($file.Name+'.exports.txt')) -Encoding utf8
+            $identities+=@{name=$file.Name;sha256=(Get-FileHash $file.FullName).Hash.ToLowerInvariant();bytes=$file.Length}
+          }
+          $identities|ConvertTo-Json|Set-Content -LiteralPath "$symbols/modules.json" -Encoding utf8
+          Get-ChildItem native/build-ui/Release -Filter '*.pdb' -File|Copy-Item -Destination $symbols
+          $debugger='C:/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe'
+          if(Test-Path -LiteralPath $debugger){
+            foreach($dump in Get-ChildItem -LiteralPath $env:GSW_UI_ROOT -Filter '*.dmp' -Recurse -File){
+              & $debugger -z $dump.FullName -y (Resolve-Path native/build-ui/Release).Path -c '.ecxr; k; q' 2>&1|
+                Set-Content -LiteralPath ($dump.FullName+'.stack.txt') -Encoding utf8
+            }
+          }else{'Installed CDB unavailable; raw fault context/module offsets retained, not a symbolized stack.'|Set-Content "$symbols/cdb-NOT_RUN.txt" -Encoding utf8}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

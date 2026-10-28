@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <iterator>
 
 namespace gsw {
 
@@ -21,6 +22,73 @@ constexpr int kMinimumScale = 90;
 constexpr int kMaximumScale = 150;
 constexpr int kDayStartHour = 6;
 constexpr int kNightStartHour = 18;
+
+struct ColorDefinition {
+  UiColorRole role;
+  const char *dark;
+  const char *light;
+};
+
+// One source for QPalette, QSS and custom-painted chrome. Keep neutral field,
+// panel and typography baselines; application actions share the blue family.
+constexpr ColorDefinition kColors[] = {
+    {UiColorRole::Panel, "#1b1d1f", "#ffffff"},
+    {UiColorRole::Window, "#17191b", "#f3f3f3"},
+    {UiColorRole::Chrome, "#202326", "#e7e7e7"},
+    {UiColorRole::Field, "#151719", "#ffffff"},
+    {UiColorRole::Menu, "#24272a", "#ffffff"},
+    {UiColorRole::ItemView, "#191b1d", "#ffffff"},
+    {UiColorRole::AlternateItem, "#1e2123", "#f5f5f5"},
+    {UiColorRole::Header, "#24272a", "#dedede"},
+    {UiColorRole::DockTitle, "#222528", "#dedede"},
+    {UiColorRole::Button, "#2a2e31", "#f3f3f3"},
+    {UiColorRole::ButtonHover, "#34383c", "#e8eaed"},
+    {UiColorRole::DisabledSurface, "#242629", "#ededed"},
+    {UiColorRole::Text, "#e7e9ea", "#171717"},
+    {UiColorRole::MutedText, "#a2aaaf", "#444444"},
+    {UiColorRole::DisabledText, "#929a9f", "#6b6b6b"},
+    {UiColorRole::HeaderText, "#b9bec2", "#252525"},
+    {UiColorRole::DockTitleText, "#dfe2e4", "#171717"},
+    {UiColorRole::TabText, "#aeb4b8", "#444444"},
+    {UiColorRole::ActiveTabText, "#ffffff", "#171717"},
+    {UiColorRole::LogSurface, "#111315", "#ffffff"},
+    {UiColorRole::LogText, "#ced3d6", "#171717"},
+    {UiColorRole::LineSubtle, "#34383c", "#d5d9de"},
+    {UiColorRole::FieldLine, "#41464b", "#8a8a8a"},
+    {UiColorRole::ButtonLine, "#454a4f", "#8a8a8a"},
+    {UiColorRole::HeaderLine, "#35393d", "#a0a0a0"},
+    {UiColorRole::DockTitleLine, "#363a3e", "#a0a0a0"},
+    {UiColorRole::TabLine, "#373b3f", "#a0a0a0"},
+    {UiColorRole::SeparatorLine, "#3b3f43", "#aaaaaa"},
+    {UiColorRole::DisabledLine, "#34373a", "#b0b0b0"},
+    {UiColorRole::Hover, "#303438", "#e1e3e5"},
+    {UiColorRole::HoverLine, "#444a4f", "#9ba1a7"},
+    {UiColorRole::ItemHover, "#282c2f", "#edf0f3"},
+    {UiColorRole::Action, "#2d6bb2", "#2467a5"},
+    {UiColorRole::ActionTint, "#243c56", "#e4effb"},
+    {UiColorRole::ActionPressed, "#2b4866", "#d5e5f7"},
+    {UiColorRole::ActionInk, "#8cbcf0", "#135f9b"},
+    {UiColorRole::OnAction, "#ffffff", "#ffffff"},
+    {UiColorRole::Focus, "#78aef1", "#135f9b"},
+    {UiColorRole::DisabledSelection, "#40566c", "#666666"},
+    {UiColorRole::Progress, "#2d6bb2", "#aecbe8"},
+    {UiColorRole::LinkVisited, "#c7a9e9", "#64518a"},
+    {UiColorRole::Success, "#66c1a8", "#176b37"},
+    {UiColorRole::Warning, "#d9ad5b", "#805409"},
+    {UiColorRole::Danger, "#ef8585", "#ac2828"},
+    {UiColorRole::ToolTipSurface, "#2c3033", "#fffff5"},
+    {UiColorRole::ToolTipText, "#ffffff", "#171717"},
+    {UiColorRole::ToolTipLine, "#555b60", "#8a8a8a"},
+    {UiColorRole::ScrollHandle, "#484d51", "#858585"},
+    {UiColorRole::PaletteLight, "#5a6268", "#ffffff"},
+    {UiColorRole::PaletteMidlight, "#41464b", "#e0e0e0"},
+    {UiColorRole::PaletteMid, "#34383c", "#a0a0a0"},
+    {UiColorRole::PaletteDark, "#111315", "#8a8a8a"},
+    {UiColorRole::PaletteShadow, "#090b0d", "#656565"},
+    {UiColorRole::SectionText, "#d9dddf", "#171717"},
+    {UiColorRole::SectionLine, "#383c40", "#a0a0a0"},
+};
+static_assert(std::size(kColors) == static_cast<std::size_t>(UiColorRole::Count));
 
 int clampScale(const int value) {
   return std::clamp(value, kMinimumScale, kMaximumScale);
@@ -85,17 +153,25 @@ UiTheme AppTheme::currentTheme() {
   return loadTheme();
 }
 
+QColor AppTheme::color(const UiTheme theme, const UiColorRole role) {
+  const auto index = static_cast<std::size_t>(role);
+  if (index >= std::size(kColors)) return {};
+  const ColorDefinition &definition = kColors[index];
+  Q_ASSERT(definition.role == role);
+  return QColor(theme == UiTheme::Light ? definition.light : definition.dark);
+}
+
 QPalette AppTheme::palette(const UiTheme theme) {
-  const bool light = theme == UiTheme::Light;
+  const auto role = [theme](const UiColorRole value) { return color(theme, value); };
   QPalette result;
-  const QColor window(light ? "#ffffff" : "#1b1d1f");
-  const QColor base(light ? "#ffffff" : "#151719");
-  const QColor text(light ? "#171717" : "#e7e9ea");
-  const QColor muted(light ? "#444444" : "#a2aaaf");
-  const QColor disabled(light ? "#6b6b6b" : "#929a9f");
-  const QColor disabledBase(light ? "#ededed" : "#242629");
-  const QColor button(light ? "#f3f3f3" : "#2a2e31");
-  const QColor accent(light ? "#2467a5" : "#327e74");
+  const QColor window = role(UiColorRole::Panel);
+  const QColor base = role(UiColorRole::Field);
+  const QColor text = role(UiColorRole::Text);
+  const QColor muted = role(UiColorRole::MutedText);
+  const QColor disabled = role(UiColorRole::DisabledText);
+  const QColor disabledBase = role(UiColorRole::DisabledSurface);
+  const QColor button = role(UiColorRole::Button);
+  const QColor accent = role(UiColorRole::Action);
   for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive,
                                          QPalette::Disabled}) {
     const bool isDisabled = group == QPalette::Disabled;
@@ -103,33 +179,25 @@ QPalette AppTheme::palette(const UiTheme theme) {
     result.setColor(group, QPalette::Window, window);
     result.setColor(group, QPalette::WindowText, foreground);
     result.setColor(group, QPalette::Base, isDisabled ? disabledBase : base);
-    result.setColor(group, QPalette::AlternateBase,
-                    QColor(light ? "#f5f5f5" : "#1e2123"));
+    result.setColor(group, QPalette::AlternateBase, role(UiColorRole::AlternateItem));
     result.setColor(group, QPalette::Text, foreground);
     result.setColor(group, QPalette::Button, isDisabled ? disabledBase : button);
     result.setColor(group, QPalette::ButtonText, foreground);
-    result.setColor(group, QPalette::BrightText, QColor(Qt::white));
+    result.setColor(group, QPalette::BrightText, role(UiColorRole::OnAction));
     result.setColor(group, QPalette::Highlight,
-                    isDisabled ? QColor(light ? "#666666" : "#445b54") : accent);
-    result.setColor(group, QPalette::HighlightedText, QColor(Qt::white));
-    result.setColor(group, QPalette::ToolTipBase,
-                    QColor(light ? "#fffff5" : "#2c3033"));
-    result.setColor(group, QPalette::ToolTipText, foreground);
+                    isDisabled ? role(UiColorRole::DisabledSelection) : accent);
+    result.setColor(group, QPalette::HighlightedText, role(UiColorRole::OnAction));
+    result.setColor(group, QPalette::ToolTipBase, role(UiColorRole::ToolTipSurface));
+    result.setColor(group, QPalette::ToolTipText,
+                    isDisabled ? disabled : role(UiColorRole::ToolTipText));
     result.setColor(group, QPalette::PlaceholderText, isDisabled ? disabled : muted);
-    result.setColor(group, QPalette::Link,
-                    QColor(light ? "#135f9b" : "#70cdb4"));
-    result.setColor(group, QPalette::LinkVisited,
-                    QColor(light ? "#64518a" : "#c7a9e9"));
-    result.setColor(group, QPalette::Light,
-                    QColor(light ? "#ffffff" : "#5a6268"));
-    result.setColor(group, QPalette::Midlight,
-                    QColor(light ? "#e0e0e0" : "#41464b"));
-    result.setColor(group, QPalette::Mid,
-                    QColor(light ? "#a0a0a0" : "#34383c"));
-    result.setColor(group, QPalette::Dark,
-                    QColor(light ? "#8a8a8a" : "#111315"));
-    result.setColor(group, QPalette::Shadow,
-                    QColor(light ? "#656565" : "#090b0d"));
+    result.setColor(group, QPalette::Link, role(UiColorRole::ActionInk));
+    result.setColor(group, QPalette::LinkVisited, role(UiColorRole::LinkVisited));
+    result.setColor(group, QPalette::Light, role(UiColorRole::PaletteLight));
+    result.setColor(group, QPalette::Midlight, role(UiColorRole::PaletteMidlight));
+    result.setColor(group, QPalette::Mid, role(UiColorRole::PaletteMid));
+    result.setColor(group, QPalette::Dark, role(UiColorRole::PaletteDark));
+    result.setColor(group, QPalette::Shadow, role(UiColorRole::PaletteShadow));
     result.setColor(group, QPalette::Accent, accent);
   }
   return result;
@@ -329,13 +397,18 @@ QWidget {
   background: @SURFACE@;
   color: @TEXT@;
   selection-background-color: @SELECTION@;
-  selection-color: #ffffff;
+  selection-color: @ON_ACTION@;
 }
 QWidget:disabled { color: @DISABLED_TEXT@; }
 QMainWindow, QDialog { background: @WINDOW@; }
 /* Text and layout-only widgets reveal their containing surface in both themes. */
 QLabel, QCheckBox, QRadioButton, QDialogButtonBox, QSizeGrip,
 QWidget[gswLayoutContainer="true"] { background: transparent; }
+/* An outline does not change a control's content or hit rectangle. */
+QCheckBox:focus, QRadioButton:focus {
+  outline: 1px solid @FOCUS@;
+  outline-offset: -1px;
+}
 QWidget#dialogBody, QScrollArea#dialogBodyScroll,
 QScrollArea#dialogBodyScroll > QWidget { background: @WINDOW@; }
 QMenuBar {
@@ -370,7 +443,8 @@ QToolButton {
   padding: @BUTTON_PAD@px;
 }
 QToolButton:hover { background: @HOVER@; border-color: @HOVER_BORDER@; }
-QToolButton:pressed, QToolButton:checked { background: @PRESSED@; border-color: @ACCENT@; }
+QToolButton:checked { background: @CHECKED@; border-color: @ACCENT@; }
+QToolButton:pressed { background: @PRESSED@; border-color: @ACCENT@; }
 QToolButton:focus { border-color: @FOCUS@; }
 QToolButton:disabled { color: @DISABLED_TEXT@; }
 QPushButton {
@@ -381,7 +455,8 @@ QPushButton {
   border-radius: 4px;
 }
 QPushButton:hover { background: @BUTTON_HOVER@; border-color: @BUTTON_HOVER_BORDER@; }
-QPushButton:pressed, QPushButton:checked { background: @PRESSED@; border-color: @ACCENT@; }
+QPushButton:checked { background: @CHECKED@; border-color: @ACCENT@; }
+QPushButton:pressed { background: @PRESSED@; border-color: @ACCENT@; }
 QPushButton:focus, QPushButton:default { border-color: @FOCUS@; }
 QPushButton:disabled { color: @DISABLED_TEXT@; background: @DISABLED_SURFACE@; border-color: @DISABLED_BORDER@; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
@@ -415,9 +490,16 @@ QTreeView::item, QTableView::item {
 }
 QListView::item { background: transparent; border: 0; }
 QTreeView::item:hover, QTableView::item:hover { background: @ITEM_HOVER@; }
-QTreeView::item:selected, QTableView::item:selected { background: @PRESSED@; color: @TEXT@; }
+QTreeView::item:selected, QTableView::item:selected { background: @CHECKED@; color: @TEXT@; }
 QListView::item:hover { background: @ITEM_HOVER@; }
-QListView::item:selected { background: @PRESSED@; color: @TEXT@; }
+QListView::item:selected { background: @CHECKED@; color: @TEXT@; }
+/* Keep border:0 for ordinary cells and blank columns. Focus is an independent
+   inset outline rather than an extra border that moves text or narrows rows. */
+QAbstractItemView:focus,
+QTreeView::item:focus, QTableView::item:focus, QListView::item:focus {
+  outline: 1px solid @FOCUS@;
+  outline-offset: -1px;
+}
 QHeaderView, QHeaderView QWidget#qt_scrollarea_viewport { background: @HEADER@; }
 QHeaderView::section {
   background: @HEADER@;
@@ -455,15 +537,21 @@ QToolButton#dockTitleButton {
 }
 QToolButton#dockTitleButton:hover { background: @BUTTON_HOVER@; }
 QToolButton#dockTitleButton:pressed { background: @PRESSED@; }
+QToolButton#dockTitleButton:focus {
+  outline: 1px solid @FOCUS@;
+  outline-offset: -1px;
+}
 QTabWidget::pane { border: 0; border-top: 1px solid @TAB_BORDER@; }
 QTabBar::tab {
   background: @BAR@;
   color: @TAB_TEXT@;
   padding: @TAB_V@px @TAB_H@px;
   border: 0;
+  border-top: 2px solid transparent;
 }
 QTabBar::tab:selected { color: @ACTIVE_TAB_TEXT@; background: @BUTTON@; border-top: 2px solid @FOCUS@; }
 QTabBar::tab:hover:!selected { background: @TAB_HOVER@; }
+QTabBar::tab:focus { outline: 1px solid @FOCUS@; outline-offset: -1px; }
 QTabBar::tab:disabled { color: @DISABLED_TEXT@; }
 QPlainTextEdit {
   background: @LOG@;
@@ -514,63 +602,62 @@ QToolTip { background: @TOOLTIP@; color: @TOOLTIP_TEXT@; border: 1px solid @TOOL
   // give resize handles the same neutral gray as the light panel headers.
   struct ColorToken {
     const char *token;
-    const char *dark;
-    const char *light;
+    UiColorRole role;
   };
   const ColorToken colors[] = {
-      {"@SURFACE@", "#1b1d1f", "#ffffff"},
-      {"@TEXT@", "#e7e9ea", "#171717"},
-      {"@SELECTION@", "#327e74", "#2467a5"},
-      {"@PROGRESS@", "#327e74", "#aecbe8"},
-      {"@WINDOW@", "#17191b", "#f3f3f3"},
-      {"@BAR@", "#202326", "#e7e7e7"},
-      {"@BORDER@", "#34383c", "#a0a0a0"},
-      {"@HOVER@", "#303438", "#d8e5f2"},
-      {"@MENU@", "#24272a", "#ffffff"},
-      {"@HEADER@", "#24272a", "#dedede"},
-      {"@FIELD_BORDER@", "#41464b", "#8a8a8a"},
-      {"@MENU_SELECTION@", "#356e67", "#cddff3"},
-      {"@SEPARATOR@", "#3b3f43", "#aaaaaa"},
-      {"@HOVER_BORDER@", "#444a4f", "#6e8ead"},
-      {"@PRESSED@", "#315d58", "#cddff3"},
-      {"@ACCENT@", "#4a9a8f", "#2467a5"},
-      {"@DISABLED_TEXT@", "#929a9f", "#6b6b6b"},
-      {"@BUTTON@", "#2a2e31", "#f3f3f3"},
-      {"@BUTTON_BORDER@", "#454a4f", "#8a8a8a"},
-      {"@BUTTON_HOVER@", "#34383c", "#e0e8f1"},
-      {"@BUTTON_HOVER_BORDER@", "#5a6268", "#135f9b"},
-      {"@DISABLED_SURFACE@", "#242629", "#ededed"},
-      {"@DISABLED_BORDER@", "#34373a", "#b0b0b0"},
-      {"@FIELD@", "#151719", "#ffffff"},
-      {"@FOCUS@", "#55b2a5", "#135f9b"},
-      {"@ITEM_VIEW@", "#191b1d", "#ffffff"},
-      {"@ALTERNATE@", "#1e2123", "#f5f5f5"},
-      {"@ITEM_HOVER@", "#282c2f", "#e5edf7"},
-      {"@HEADER_TEXT@", "#b9bec2", "#252525"},
-      {"@HEADER_BORDER@", "#35393d", "#a0a0a0"},
-      {"@TITLE_TEXT@", "#dfe2e4", "#171717"},
-      {"@TITLE@", "#222528", "#dedede"},
-      {"@TITLE_BORDER@", "#363a3e", "#a0a0a0"},
-      {"@TAB_BORDER@", "#373b3f", "#a0a0a0"},
-      {"@TAB_TEXT@", "#aeb4b8", "#444444"},
-      {"@ACTIVE_TAB_TEXT@", "#ffffff", "#171717"},
-      {"@TAB_HOVER@", "#272a2d", "#d8e5f2"},
-      {"@LOG@", "#111315", "#ffffff"},
-      {"@LOG_TEXT@", "#ced3d6", "#171717"},
-      {"@SCROLL_HANDLE@", "#484d51", "#858585"},
-      {"@SECTION_TEXT@", "#d9dddf", "#171717"},
-      {"@SECTION_BORDER@", "#383c40", "#a0a0a0"},
-      {"@MUTED_TEXT@", "#949ba0", "#444444"},
-      {"@GOOD_TEXT@", "#66c1a8", "#176b37"},
-      {"@WARN_TEXT@", "#d9ad5b", "#805409"},
-      {"@TOOLTIP@", "#2c3033", "#fffff5"},
-      {"@TOOLTIP_TEXT@", "#ffffff", "#171717"},
-      {"@TOOLTIP_BORDER@", "#555b60", "#8a8a8a"},
+      {"@SURFACE@", UiColorRole::Panel},
+      {"@TEXT@", UiColorRole::Text},
+      {"@SELECTION@", UiColorRole::Action},
+      {"@ON_ACTION@", UiColorRole::OnAction},
+      {"@PROGRESS@", UiColorRole::Progress},
+      {"@WINDOW@", UiColorRole::Window},
+      {"@BAR@", UiColorRole::Chrome},
+      {"@BORDER@", UiColorRole::LineSubtle},
+      {"@HOVER@", UiColorRole::Hover},
+      {"@MENU@", UiColorRole::Menu},
+      {"@HEADER@", UiColorRole::Header},
+      {"@FIELD_BORDER@", UiColorRole::FieldLine},
+      {"@MENU_SELECTION@", UiColorRole::ActionTint},
+      {"@SEPARATOR@", UiColorRole::SeparatorLine},
+      {"@HOVER_BORDER@", UiColorRole::HoverLine},
+      {"@PRESSED@", UiColorRole::ActionPressed},
+      {"@CHECKED@", UiColorRole::ActionTint},
+      {"@ACCENT@", UiColorRole::Action},
+      {"@DISABLED_TEXT@", UiColorRole::DisabledText},
+      {"@BUTTON@", UiColorRole::Button},
+      {"@BUTTON_BORDER@", UiColorRole::ButtonLine},
+      {"@BUTTON_HOVER@", UiColorRole::ButtonHover},
+      {"@BUTTON_HOVER_BORDER@", UiColorRole::HoverLine},
+      {"@DISABLED_SURFACE@", UiColorRole::DisabledSurface},
+      {"@DISABLED_BORDER@", UiColorRole::DisabledLine},
+      {"@FIELD@", UiColorRole::Field},
+      {"@FOCUS@", UiColorRole::Focus},
+      {"@ITEM_VIEW@", UiColorRole::ItemView},
+      {"@ALTERNATE@", UiColorRole::AlternateItem},
+      {"@ITEM_HOVER@", UiColorRole::ItemHover},
+      {"@HEADER_TEXT@", UiColorRole::HeaderText},
+      {"@HEADER_BORDER@", UiColorRole::HeaderLine},
+      {"@TITLE_TEXT@", UiColorRole::DockTitleText},
+      {"@TITLE@", UiColorRole::DockTitle},
+      {"@TITLE_BORDER@", UiColorRole::DockTitleLine},
+      {"@TAB_BORDER@", UiColorRole::TabLine},
+      {"@TAB_TEXT@", UiColorRole::TabText},
+      {"@ACTIVE_TAB_TEXT@", UiColorRole::ActiveTabText},
+      {"@TAB_HOVER@", UiColorRole::Hover},
+      {"@LOG@", UiColorRole::LogSurface},
+      {"@LOG_TEXT@", UiColorRole::LogText},
+      {"@SCROLL_HANDLE@", UiColorRole::ScrollHandle},
+      {"@SECTION_TEXT@", UiColorRole::SectionText},
+      {"@SECTION_BORDER@", UiColorRole::SectionLine},
+      {"@MUTED_TEXT@", UiColorRole::MutedText},
+      {"@GOOD_TEXT@", UiColorRole::Success},
+      {"@WARN_TEXT@", UiColorRole::Warning},
+      {"@TOOLTIP@", UiColorRole::ToolTipSurface},
+      {"@TOOLTIP_TEXT@", UiColorRole::ToolTipText},
+      {"@TOOLTIP_BORDER@", UiColorRole::ToolTipLine},
   };
-  for (const ColorToken &color : colors) {
-    css.replace(QString::fromLatin1(color.token),
-                QString::fromLatin1(theme == UiTheme::Light ? color.light
-                                                          : color.dark));
+  for (const ColorToken &token : colors) {
+    css.replace(QString::fromLatin1(token.token), color(theme, token.role).name());
   }
 
   const auto replace = [&css, scalePercent](const QString &token, const int baseValue) {

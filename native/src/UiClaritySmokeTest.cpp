@@ -2,6 +2,7 @@
 #include "NativeViewport.h"
 #include "AppLanguage.h"
 #include "AppTheme.h"
+#include "UiSurfaceEvidence.h"
 
 #include <QApplication>
 #include <QDir>
@@ -178,33 +179,7 @@ bool runUiClaritySmokeTest(NativeViewport &viewport) {
         {"physicalImageSize", QJsonArray{fullWindow.width(), fullWindow.height()}},
         {"pixmapDpr", fullWindow.devicePixelRatio()}});
   }
-  QJsonArray fonts;
-  // Immutable glyph-test data, not a translatable user-interface message.
-  const char32_t glyphProbe[]{0x4c, 0x61, 0x74, 0x69, 0x6e, 0x20, 0x4e2d, 0x6587,
-      0x20, 0x65e5, 0x672c, 0x8a9e, 0x20, 0x30, 0x31, 0x32, 0x33};
-  const QString mixedProbe = QString::fromUcs4(glyphProbe, qsizetype(std::size(glyphProbe)));
-  const auto widgets = viewport.window()->findChildren<QWidget *>();
-  for (QWidget *widget : widgets) {
-    if (!widget->isVisible()) continue;
-    const QFontInfo info(widget->font());
-    QTextLayout mixed(mixedProbe, widget->font());
-    mixed.beginLayout();
-    QTextLine line = mixed.createLine();
-    if (line.isValid()) line.setLineWidth(2000);
-    mixed.endLayout();
-    QJsonArray runs;
-    for (const QGlyphRun &run : mixed.glyphRuns()) {
-      const auto glyphs = run.glyphIndexes();
-      runs.append(QJsonObject{{"family", run.rawFont().familyName()}, {"style", run.rawFont().styleName()},
-          {"glyphCount", glyphs.size()}, {"missingGlyphCount", glyphs.count(0)}});
-    }
-    fonts.append(QJsonObject{{"class", QString::fromLatin1(widget->metaObject()->className())},
-        {"name", widget->objectName()}, {"requestedFamily", widget->font().family()},
-        {"resolvedFamily", info.family()}, {"pointSize", info.pointSizeF()},
-        {"pixelSize", info.pixelSize()}, {"weight", int(info.weight())},
-        {"mixedScriptGlyphRuns", runs}});
-  }
-  environment.insert("visibleWidgetFontResolution", fonts);
+  environment.insert("visibleWidgetFontResolution", uiSurfaceFontEvidence(viewport.window()));
 #ifdef Q_OS_WIN
   environment.insert("actualWindowsWindowDpi", int(GetDpiForWindow(reinterpret_cast<HWND>(viewport.window()->winId()))));
 #endif

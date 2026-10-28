@@ -5,8 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       baseline:
-        description: Exact40-character pre-AA commit with the same passive observer
+        description: Frozen pre-AA production base; the recorded common QA overlay is applied explicitly
         required: true
+        default: b0e9fae5c53156b74e247e9c56ab3d0bd1e4a0ff
         type: string
 
 permissions:
@@ -50,13 +51,15 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
-      - name: Build both exact-source arms before any measurement
+      - name: Build source-bound production arms with an explicit common QA overlay
         shell: pwsh
         env:
           GSW_UI_PERF_BASELINE: ${{ inputs.baseline }}
         run: |
           $ErrorActionPreference='Stop'
           if ($env:GSW_UI_PERF_BASELINE -cnotmatch '^[0-9a-f]{40}$') { throw 'Baseline must be an exact commit.' }
+          $frozen='b0e9fae5c53156b74e247e9c56ab3d0bd1e4a0ff'
+          if($env:GSW_UI_PERF_BASELINE -cne $frozen){throw 'This measurement protocol freezes the pre-AA production base explicitly.'}
           git cat-file -e "$env:GSW_UI_PERF_BASELINE^{commit}"
           if ($LASTEXITCODE -ne 0) { throw 'Baseline commit unavailable.' }
           $root=Join-Path $PWD 'native/.deps'
@@ -67,12 +70,99 @@ jobs:
           $a=Join-Path $root 'ui-performance-a'
           git worktree add --detach $a $env:GSW_UI_PERF_BASELINE
           if ($LASTEXITCODE -ne 0) { throw 'Detached baseline source unavailable.' }
-          foreach($file in @('native/src/UiPaintObservation.h','native/src/UiPerformanceSmokeTest.cpp','native/src/UiPerformanceSmokeTest.h')) {
-            if ((Get-FileHash (Join-Path $a $file)).Hash -cne (Get-FileHash $file).Hash) { throw "Common observer/harness differs: $file" }
-          }
           $evidence=Join-Path $env:RUNNER_TEMP 'gsw-ui-performance'
           New-Item -ItemType Directory -Path $evidence | Out-Null
           "GSW_UI_PERF_ROOT=$evidence" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          git -C $a diff --quiet HEAD
+          if($LASTEXITCODE -ne 0){throw 'Baseline checkout was not pristine before the declared QA overlay.'}
+          git diff --quiet HEAD
+          if($LASTEXITCODE -ne 0){throw 'Candidate checkout was not pristine before measurement.'}
+          $utf8=[Text.UTF8Encoding]::new($false,$true)
+          function Get-TextSha([string]$value){
+            [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($utf8.GetBytes($value))).ToLowerInvariant()
+          }
+          $qaFiles=@('native/src/UiPaintObservation.h','native/src/UiPerformanceSmokeTest.cpp','native/src/UiPerformanceSmokeTest.h')
+          $allowed=@($qaFiles)+@('native/src/main.cpp')
+          $protected=@(git -C $a ls-tree -r --name-only HEAD -- native/src |
+            Where-Object {$_ -notin $allowed -and $_ -match '(NativeViewport|Navigation|TransformGizmoRenderer|ViewportPresentation|Grid)'} |
+            ForEach-Object {@{path=$_;beforeSha256=(Get-FileHash -LiteralPath (Join-Path $a $_)).Hash.ToLowerInvariant()}})
+          if(-not ($protected.path -contains 'native/src/NativeViewport.cpp')){throw 'Production viewport guard missing.'}
+          $fileRecords=@()
+          foreach($file in $qaFiles){
+            $before=(Get-FileHash -LiteralPath (Join-Path $a $file)).Hash.ToLowerInvariant()
+            Copy-Item -LiteralPath (Join-Path $PWD $file) -Destination (Join-Path $a $file)
+            $after=(Get-FileHash -LiteralPath (Join-Path $a $file)).Hash.ToLowerInvariant()
+            if($after -cne (Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant()){throw "Common QA file differs: $file"}
+            $fileRecords+=@{path=$file;beforeSha256=$before;afterSha256=$after}
+          }
+          $main='native/src/main.cpp'
+          $baselineMain=Join-Path $a $main
+          $baseMainBlob=(git -C $a rev-parse "$($frozen):$main").Trim()
+          $actualMainBlob=(git -C $a hash-object "--path=$main" $baselineMain).Trim()
+          if($actualMainBlob -cne $baseMainBlob){throw 'Baseline main.cpp is not the exact frozen blob.'}
+          $beforeMain=[IO.File]::ReadAllText($baselineMain,$utf8)
+          $candidateMain=[IO.File]::ReadAllText((Join-Path $PWD $main),$utf8)
+          $pattern='(?ms)^  if \(parser\.isSet\(uiPerformanceOption\)\) \{\r?\n(?:(?!^  \}).)*^  \}\r?\n(?=  window\.show\(\);)'
+          $oldMatches=[regex]::Matches($beforeMain,$pattern)
+          $newMatches=[regex]::Matches($candidateMain,$pattern)
+          if($oldMatches.Count -ne 1 -or $newMatches.Count -ne 1){throw 'Perf-only pre-show main block is ambiguous.'}
+          $old=$oldMatches[0]
+          $common=$newMatches[0].Value.Replace("`r`n","`n")
+          if(([regex]::Matches($common,'prepareUiPerformanceWindow\(window\)')).Count -ne 1 -or
+             ([regex]::Matches($common,'setUiPaintObservationEnabled\(true\)')).Count -ne 1 -or
+             $common -match 'findChildren|setFixedSize|adjustSize'){
+            throw 'Candidate pre-show block must only use the same reviewed QA preparation entry and observer enable.'
+          }
+          $newline=if($old.Value.Contains("`r`n")){"`r`n"}else{"`n"}
+          $replacement=$common.Replace("`n",$newline)
+          $prefix=$beforeMain.Substring(0,$old.Index)
+          $suffix=$beforeMain.Substring($old.Index+$old.Length)
+          $beforeMainSha=(Get-FileHash -LiteralPath $baselineMain).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText($baselineMain,$prefix+$replacement+$suffix,$utf8)
+          $afterMain=[IO.File]::ReadAllText($baselineMain,$utf8)
+          if($afterMain.Substring(0,$prefix.Length) -cne $prefix -or
+             $afterMain.Substring($prefix.Length+$replacement.Length) -cne $suffix){
+            throw 'A non-QA main.cpp byte changed.'
+          }
+          $mainPatch=@{path=$main;baselineBlob=$baseMainBlob;beforeSha256=$beforeMainSha;
+            afterSha256=(Get-FileHash -LiteralPath $baselineMain).Hash.ToLowerInvariant();
+            beforeBlockSha256=(Get-TextSha $old.Value.Replace("`r`n","`n"));
+            afterBlockSha256=(Get-TextSha $common);
+            prefixUnchanged=$true;suffixUnchanged=$true}
+          $changed=@(git -C $a diff --name-only HEAD)
+          if(@($changed|Where-Object {$_ -notin $allowed}).Count){throw 'Unlisted baseline production change refused.'}
+          foreach($guard in $protected){
+            $guard['afterSha256']=(Get-FileHash -LiteralPath (Join-Path $a $guard.path)).Hash.ToLowerInvariant()
+            if($guard.afterSha256 -cne $guard.beforeSha256){throw "Protected production file changed: $($guard.path)"}
+          }
+          $diffPath=Join-Path $evidence 'common-qa-overlay.diff'
+          git -C $a diff --binary --no-ext-diff HEAD -- @allowed |
+            Out-File -LiteralPath $diffPath -Encoding utf8
+          if($LASTEXITCODE -ne 0){throw 'Cannot retain actual QA overlay diff.'}
+          # A temporary index records the actual composite tree without changing
+          # the checkout's index, a branch, or the frozen production commit.
+          $previousIndex=$env:GIT_INDEX_FILE
+          try {
+            $env:GIT_INDEX_FILE=Join-Path $root 'ui-performance-A-composite.index'
+            if(Test-Path -LiteralPath $env:GIT_INDEX_FILE){throw 'Composite index must be fresh.'}
+            git -C $a read-tree $frozen
+            if($LASTEXITCODE -ne 0){throw 'Cannot seed the owned composite index.'}
+            git -C $a add -- @allowed
+            if($LASTEXITCODE -ne 0){throw 'Cannot bind the whitelisted QA files.'}
+            $compositeTree=(git -C $a write-tree).Trim()
+            if($LASTEXITCODE -ne 0 -or $compositeTree -cnotmatch '^[0-9a-f]{40}$'){throw 'Cannot bind actual composite source tree.'}
+          } finally {
+            if($null -eq $previousIndex){Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue}
+            else{$env:GIT_INDEX_FILE=$previousIndex}
+          }
+          $overlayReceipt=Join-Path $evidence 'common-qa-overlay.json'
+          [ordered]@{schema='gsw.ui_performance_common_qa_overlay/1';sourceProductionBaseCommit=$frozen;
+            fromCommit=$env:GITHUB_SHA;files=$fileRecords;mainPatch=$mainPatch;changedPaths=$changed;
+            protectedProductionFiles=$protected;unlistedTrackedDiff=@();actualDiffSha256=(Get-FileHash $diffPath).Hash.ToLowerInvariant();
+            baseTree=(git -C $a rev-parse 'HEAD^{tree}').Trim();compositeTree=$compositeTree;
+            untouchedBaselineBinary=$false;productionOutsideWhitelistUnchanged=$true}|ConvertTo-Json -Depth 8|
+            Set-Content -LiteralPath $overlayReceipt -Encoding utf8
+          $overlayIdentity=(Get-FileHash -LiteralPath $overlayReceipt).Hash.ToLowerInvariant()
           $arms=@()
           foreach($arm in @(@{name='A';source=$a;commit=$env:GSW_UI_PERF_BASELINE},@{name='B';source=$PWD.Path;commit=$env:GITHUB_SHA})) {
             $build=Join-Path $root ('ui-perf-build-'+$arm.name)
@@ -86,13 +176,37 @@ jobs:
               Tee-Object -FilePath (Join-Path $evidence ('build-'+$arm.name+'.log'))
             if ($LASTEXITCODE -ne 0) { throw "Build failed: $($arm.name)" }
             $exe=Join-Path $build 'Release/Gaussian Scene Workbench.exe'
-            $tree=(git -C $arm.source rev-parse 'HEAD^{tree}').Trim()
-            $arms+=@{arm=$arm.name;sourceCommit=$arm.commit;sourceTree=$tree;executable=$exe;executableSha256=(Get-FileHash $exe).Hash.ToLowerInvariant()}
+            $baseTree=(git -C $arm.source rev-parse 'HEAD^{tree}').Trim()
+            $tree=if($arm.name -eq 'A'){$compositeTree}else{$baseTree}
+            $arms+=@{arm=$arm.name;sourceCommit=$arm.commit;sourceProductionBaseCommit=$arm.commit;baseSourceTree=$baseTree;
+              sourceTree=$tree;workingTreeIsClean=($arm.name -eq 'B');commonObserverOverlayApplied=($arm.name -eq 'A');
+              commonObserverOverlayFromCommit=$env:GITHUB_SHA;commonObserverOverlayIdentity=$overlayIdentity;
+              sourceDirectory=[string]$arm.source;executable=$exe;executableSha256=(Get-FileHash $exe).Hash.ToLowerInvariant()}
           }
-          [ordered]@{schema='gsw.ui_performance_sources/1';runId=$env:GITHUB_RUN_ID;runner=$env:RUNNER_NAME;arms=$arms;
+          $afterBuildChanges=@(git -C $a diff --name-only HEAD)
+          if(@($afterBuildChanges|Where-Object {$_ -notin $allowed}).Count){throw 'Build modified unlisted baseline production source.'}
+          foreach($guard in $protected){
+            if((Get-FileHash -LiteralPath (Join-Path $a $guard.path)).Hash.ToLowerInvariant() -cne $guard.beforeSha256){
+              throw "Build changed protected production bytes: $($guard.path)"
+            }
+          }
+          foreach($file in $qaFiles){
+            if((Get-FileHash -LiteralPath (Join-Path $a $file)).Hash -cne (Get-FileHash -LiteralPath $file).Hash){
+              throw "The final two-arm common QA file differs: $file"
+            }
+          }
+          if((Get-FileHash -LiteralPath $baselineMain).Hash.ToLowerInvariant() -cne $mainPatch.afterSha256){
+            throw 'Build changed the source-bound QA main block.'
+          }
+          git diff --quiet HEAD
+          if($LASTEXITCODE -ne 0){throw 'Candidate source became dirty during build; clean-tree metadata would be false.'}
+          $sourcesPath=Join-Path $evidence 'sources.json'
+          [ordered]@{schema='gsw.ui_performance_sources/2';runId=$env:GITHUB_RUN_ID;runner=$env:RUNNER_NAME;arms=$arms;
+            commonObserverOverlayReceipt=$overlayReceipt;commonObserverOverlayIdentity=$overlayIdentity;
             acceptanceSha256=(Get-FileHash docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json).Hash.ToLowerInvariant();
             planSha256=(Get-FileHash docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md).Hash.ToLowerInvariant()}|ConvertTo-Json -Depth 6|
-            Set-Content -LiteralPath "$evidence/sources.json" -Encoding utf8
+            Set-Content -LiteralPath $sourcesPath -Encoding utf8
+          "GSW_UI_PERF_SOURCES_JSON=$sourcesPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare isolated real Windows OpenGL display
         shell: pwsh
         run: |

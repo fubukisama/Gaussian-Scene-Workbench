@@ -12,6 +12,7 @@
 #include "ModelInteraction.h"
 #include "RenderFrameDiagnostics.h"
 #include "TransformGizmoRenderer.h"
+#include "TransformOverlayKey.h"
 #include "NavigationGizmo.h"
 #include "ScreenSpaceSelection.h"
 #include "ViewportCamera.h"
@@ -151,25 +152,28 @@ bool lightViewport() { return AppTheme::currentTheme() == UiTheme::Light; }
 
 ViewportColors viewportColors() {
   ViewportColors colors;
+  const auto theme = AppTheme::currentTheme();
+  // Application action roles are shared with widget chrome. XYZ axes,
+  // selection warnings and the actual scene backdrop remain independent.
+  colors.accent = AppTheme::color(theme, UiColorRole::ActionInk);
+  colors.processText = AppTheme::color(theme, UiColorRole::ActionInk);
+  colors.progress = AppTheme::color(theme, UiColorRole::Action);
+  colors.modeCard = AppTheme::color(theme, UiColorRole::Action);
+  colors.modeText = AppTheme::color(theme, UiColorRole::OnAction);
+  colors.toolActive = AppTheme::color(theme, UiColorRole::Action);
   if (!lightViewport()) return colors;
   colors.backdrop = QColor(255, 255, 255);
   colors.card = QColor(255, 255, 255);
   colors.text = QColor(25, 28, 32);
   colors.muted = QColor(65, 72, 80);
-  colors.accent = QColor(24, 79, 165);
   colors.processCard = QColor(247, 248, 250);
-  colors.processText = QColor(24, 79, 165);
   colors.processDetail = QColor(65, 72, 80);
-  colors.progress = QColor(31, 98, 201);
-  colors.modeCard = QColor(31, 98, 201);
-  colors.modeText = QColor(255, 255, 255);
   colors.hintCard = QColor(255, 255, 255);
   colors.hintText = QColor(36, 39, 43);
   colors.highlight = QColor(168, 108, 14);
   colors.toolCard = QColor(245, 246, 248);
   colors.toolBorder = QColor(199, 205, 214);
   colors.toolHover = QColor(225, 229, 235);
-  colors.toolActive = QColor(31, 98, 201);
   colors.toolIcon = QColor(27, 31, 36);
   colors.disabledText = QColor(113, 121, 131);
   colors.handleEdge = QColor(38, 43, 50);
@@ -8584,9 +8588,9 @@ void NativeViewport::drawModelSelection(
 }
 
 void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
-  if (mEditToolsLocked) return;
+  if (mEditToolsLocked) { mTransformCoverage.clear(); return; }
   const auto layout = modelTransformGizmo();
-  if (!layout.valid) return;
+  if (!layout.valid) { mTransformCoverage.clear(); return; }
   const auto colors = viewportColors();
   TransformGizmoStyle style;
   style.axes = {navigationAxisColor(0), navigationAxisColor(1), navigationAxisColor(2)};
@@ -8594,9 +8598,24 @@ void NativeViewport::drawModelTransformGizmo(QPainter &painter) {
   style.neutral = colors.viewRing;
   style.centerEdge = colors.handleEdge;
   style.light = lightViewport();
-  paintTransformGizmo(painter, layout, mTransformGizmoMode, style,
-                        mTransformGizmoPress.isValid() ? mTransformGizmoPress : mTransformGizmoHover,
-                        mTransformGizmoDragActive || mModelDragActive);
+  const auto highlight = mTransformGizmoPress.isValid() ? mTransformGizmoPress : mTransformGizmoHover;
+  const bool dragging = mTransformGizmoDragActive || mModelDragActive;
+  const auto key = transformOverlayKey(layout, mTransformGizmoMode, style, highlight, dragging);
+  const bool covered = !key.isEmpty() && mTransformCoverage.paint(painter,
+      transformOverlayBounds(layout, QRectF(rect())), key,
+      [&](QPainter &raster, QJsonObject &) {
+        paintTransformGizmo(raster, layout, mTransformGizmoMode, style, highlight, dragging);
+      });
+  if (!covered)
+    paintTransformGizmo(painter, layout, mTransformGizmoMode, style, highlight, dragging);
+  if (mRenderDiagnostics && mRenderDiagnostics->recording())
+    mRenderDiagnostics->note(QStringLiteral("transform-coverage"), QJsonObject{
+        {"method", covered ? "native-dpr-raster-aa/1" : "original-vector-fallback"},
+        {"mode", int(mTransformGizmoMode)}, {"cacheHit", covered && mTransformCoverage.lastHit()},
+        {"generation", qint64(mTransformCoverage.generation())},
+        {"peakOwnedCpuBytes", qint64(mTransformCoverage.peakCpuBytes())},
+        {"requestedImageUploadBytes", qint64(mTransformCoverage.requestedGpuBytes())},
+        {"hitGeometryUnchanged", true}, {"fullViewportSupersampling", false}});
 }
 
 void NativeViewport::drawTransformToolStrip(QPainter &painter) {
@@ -8947,7 +8966,7 @@ void NativeViewport::drawAxisGizmo(QPainter &painter) {
   const bool covered = mNavigationCoverage.paint(painter, navigationOverlayBounds(layout),
       navigationOverlayKey(layout, state, AppLanguage::current()),
       [&](QPainter &raster, QJsonObject &metadata) {
-        drawBlenderNavigationPresentation(raster, layout, state, &metadata);
+        drawBlenderNavigationPresentation(raster, layout, state, &metadata, mUiRasterTraceEnabled);
       });
   if (!covered)
     drawBlenderNavigationPresentation(painter, layout, state, recording ? &diagnostics : nullptr);

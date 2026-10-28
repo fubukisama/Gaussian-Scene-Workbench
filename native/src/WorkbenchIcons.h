@@ -22,11 +22,22 @@ enum class WorkbenchIconId {
   FullScreen, Restore, Count
 };
 
+// Passive checked controls and selected rows use tint, not a solid highlight.
+// Strongly filled action surfaces opt in so their icon can use on-accent ink.
+enum class WorkbenchIconSurface {
+  Tinted,
+  OnAccent,
+};
+
 // Shared SVG artwork is rendered at the requested logical size and device
 // pixel ratio. Callers refresh the palette on appearance changes; drawing
 // callers pass their actual foreground ink for hover/selected states.
 [[nodiscard]] QIcon workbenchIcon(WorkbenchIconId id, const QPalette &palette,
-                                  bool accent = false);
+                                  bool accent = false,
+                                  WorkbenchIconSurface surface = WorkbenchIconSurface::Tinted);
+[[nodiscard]] QColor workbenchIconInk(const QPalette &palette, QIcon::Mode mode,
+                                      QIcon::State state, bool accent = false,
+                                      WorkbenchIconSurface surface = WorkbenchIconSurface::Tinted);
 void paintWorkbenchIcon(QPainter &painter, WorkbenchIconId id,
                          const QRectF &rect, const QColor &ink);
 [[nodiscard]] QString workbenchIconAssetName(WorkbenchIconId id);
