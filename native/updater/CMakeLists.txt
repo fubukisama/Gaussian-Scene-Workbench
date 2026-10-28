@@ -29,8 +29,8 @@ if(BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   qt_add_executable(gsw_update_activation_tests ../tests/NativeUpdateActivationTests.cpp ../src/NativeDeveloperPublisher.cpp)
   target_link_libraries(gsw_update_activation_tests PRIVATE gsw_activation_core Qt6::Test)
-  add_test(NAME update_activation_contract COMMAND gsw_update_activation_tests)
+  add_test(NAME update_activation_contract COMMAND gsw_update_activation_tests -o -,txt)
   set_tests_properties(update_activation_contract PROPERTIES TIMEOUT 60
-    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py"
+    ENVIRONMENT "GSW_UPDATE_TEST_PYTHON=${Python3_EXECUTABLE};GSW_UPDATE_ACTIVATION_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/native_update_activation_fixture.py;QT_FORCE_STDERR_LOGGING=1"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 endif()
