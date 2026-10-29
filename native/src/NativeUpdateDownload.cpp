@@ -458,7 +458,10 @@ public:
           end != request.expectedLength - 1 || total != request.expectedLength ||
           reply->rawHeader("ETag").trimmed() != entityTag) {
         resumeValid = false;
-        finish(QStringLiteral("download_resume_rejected")); return false;
+        // Never consume an unusable 206 body or splice it into the owned
+        // prefix. The ordinary bounded retry discards that now-unbound cache
+        // and reissues the same signed identity from zero under its deadline.
+        retryLater(QStringLiteral("download_resume_rejected")); return false;
       }
     }
     const auto length = reply->rawHeader("Content-Length").trimmed();

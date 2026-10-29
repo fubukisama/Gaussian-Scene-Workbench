@@ -32,6 +32,8 @@ on:
       - 'scripts/*native_release_gate*'
       - 'scripts/prepare_native_update_trust_ci.py'
       - 'scripts/test_native_developer_publisher.py'
+      - 'scripts/test_native_activation_interruptions.py'
+      - 'scripts/test_native_recovery_entry.py'
       - 'scripts/verify_native_update_source_bundle.py'
       - 'scripts/prepare_native_update_source.py'
       - '.github/workflows/native-auto-update.yml'
@@ -537,6 +539,7 @@ jobs:
           $prepared=Get-Content native/.update-e2e/preparation.json -Raw | ConvertFrom-Json
           "GSW_UPDATER_FIXTURE_PROFILE_PATH=$($prepared.profile)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Link distinct native test helper with the issued root
+        id: e2e_helper
         shell: pwsh
         run: |
           rustup toolchain install 1.99.1 --profile minimal --no-self-update
@@ -556,6 +559,22 @@ jobs:
             --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe --windeployqt (Get-Command windeployqt).Source `
             --evidence "$PWD/native/update-e2e-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/end-to-end.log
           if($LASTEXITCODE -ne 0){throw 'Real stable-entry lifecycle contract failed.'}
+      - name: Existing Qt window and owned CPU worker queue survive publication
+        if: ${{ !cancelled() && steps.e2e_helper.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/test_native_update_live.py --remote-fixture-only `
+            --preparation native/.update-e2e/preparation.json --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe `
+            --evidence "$PWD/native/update-live-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/live.log
+          if($LASTEXITCODE -ne 0){throw 'Owned live-window CPU lifecycle contract failed.'}
+      - name: Independent recovery window remains reachable with a corrupt pointer
+        if: ${{ !cancelled() && steps.e2e_helper.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/test_native_recovery_entry.py --remote-fixture-only `
+            --preparation native/.update-e2e/preparation.json --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe `
+            --evidence "$PWD/native/recovery-entry-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/recovery-entry.log
+          if($LASTEXITCODE -ne 0){throw 'Independent native recovery entry contract failed.'}
       - name: Record isolated identity and stop only the test server
         if: always()
         shell: pwsh
@@ -576,4 +595,14 @@ jobs:
           path: native/update-e2e-evidence/
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-live-recovery-evidence
+          path: |
+            native/update-live-evidence/
+            native/recovery-entry-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 14
