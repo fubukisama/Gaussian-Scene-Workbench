@@ -4,6 +4,7 @@
 #include "NativeUpdateDownload.h"
 #include "NativeActivationFiles.h"
 #include "NativeInstallation.h"
+#include "NativeStartupHealth.h"
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -28,6 +29,59 @@ void event(const QString &phase, const QString &code = {}, const QJsonObject &fi
   stream << QJsonDocument(message).toJson(QJsonDocument::Compact) << '\n'; stream.flush();
 }
 int failure(const QString &code) { event(QStringLiteral("failed"), code); return 2; }
+
+QString healthRecordPath(const QString &root) {
+  return QDir(root).filePath(QStringLiteral("updates/startup-health.json"));
+}
+void saveHealth(const QString &root, const QJsonObject &status) noexcept {
+  // Optional availability evidence, not update authority. Read-only roots,
+  // damaged records or a full disk must never turn PROCESS_CREATED into failure.
+  try {
+    const auto path = healthRecordPath(root);
+    gsw::activation::ensureDirectory(QFileInfo(path).absolutePath());
+    gsw::activation::durableWrite(path, QJsonDocument(status).toJson(QJsonDocument::Compact), true);
+  } catch (...) {}
+}
+int startupStatus(const QString &root) {
+  QJsonObject fields;
+  QString code = QStringLiteral("UNCONFIRMED");
+  try {
+    const auto value = gsw::activation::parse(gsw::activation::read(healthRecordPath(root), 8192), 8192);
+    gsw::activation::exactKeys(value, {"schema", "code", "attempt"});
+    if (gsw::activation::string(value.at("schema")) != QLatin1String("gsw.native_startup_status/1"))
+      gsw::activation::fail("INVALID_REQUEST");
+    const auto bytes = QByteArray::fromStdString(value.dump());
+    const auto status = QJsonDocument::fromJson(bytes).object();
+    const auto storedCode = status.value(QStringLiteral("code")).toString();
+    const auto attempt = status.value(QStringLiteral("attempt")).toObject();
+    const QSet<QString> baseKeys{"attemptId", "buildId", "executableSha256", "pid", "processCreationTime"};
+    auto expectedKeys = baseKeys;
+    if (storedCode == QLatin1String("HEALTHY")) expectedKeys.insert(QStringLiteral("healthScope"));
+    else if (storedCode != QLatin1String("UNCONFIRMED")) gsw::activation::fail("INVALID_REQUEST");
+    const auto names = attempt.keys();
+    if (QSet<QString>(names.cbegin(), names.cend()) != expectedKeys) gsw::activation::fail("INVALID_REQUEST");
+    static const QRegularExpression id(QStringLiteral("^[a-f0-9]{32}$"));
+    static const QRegularExpression birth(QStringLiteral("^[a-f0-9]{16}$"));
+    if (!id.match(attempt.value("attemptId").toString()).hasMatch() ||
+        !birth.match(attempt.value("processCreationTime").toString()).hasMatch() ||
+        attempt.value("processCreationTime").toString() == QLatin1String("0000000000000000") ||
+        !attempt.value("pid").isDouble() || attempt.value("pid").toDouble() < 1 ||
+        attempt.value("pid").toDouble() > 4294967295.0 ||
+        attempt.value("pid").toDouble() != double(attempt.value("pid").toInteger())) gsw::activation::fail("INVALID_REQUEST");
+    gsw::activation::buildId(gsw::activation::Json(attempt.value("buildId").toString().toStdString()));
+    gsw::activation::sha(attempt.value("executableSha256").toString());
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+    constexpr auto scope = "qt-fixture-window-surface";
+#else
+    constexpr auto scope = "main-window-base-viewport";
+#endif
+    if (storedCode == QLatin1String("HEALTHY") && attempt.value("healthScope") != QLatin1String(scope))
+      gsw::activation::fail("INVALID_REQUEST");
+    code = storedCode; fields.insert(QStringLiteral("attempt"), attempt);
+  } catch (...) {} // Missing/malformed evidence is neutral; never rewrite it.
+  event(QStringLiteral("startup_status"), code, fields);
+  return 0;
+}
 
 QByteArray readLaunchInput() {
 #ifdef Q_OS_WIN
@@ -94,14 +148,17 @@ int installedLaunch(const QString &operation, const QString &root,
   // Re-read the exact pointer under the held lock before process creation.
   if (parse(read(QDir(root).filePath(QStringLiteral("current.json")), 16384), 16384) != pointer)
     fail("LAUNCH_IDENTITY_CHANGED");
-  QProcess child;
-  child.setProgram(plan.program); child.setArguments(plan.arguments);
-  child.setWorkingDirectory(plan.workingDirectory); child.setProcessEnvironment(plan.environment);
-  child.setStandardInputFile(QProcess::nullDevice());
-  child.setStandardOutputFile(QProcess::nullDevice()); child.setStandardErrorFile(QProcess::nullDevice());
-  if (!child.startDetached()) return failure(QStringLiteral("managed_installation_start_failed"));
+  QString startError;
+  auto attempt = gsw::NativeStartupAttempt::start(plan, &startError);
+  if (!attempt) return failure(startError);
   event(QStringLiteral("launched"), QStringLiteral("PROCESS_CREATED"), fields);
-  return 0; // Creation is not application-health acceptance.
+  // Exactly one canonical stdout result. Optional bounded observation must not
+  // retract successful process creation, kill it, repoint current or restart it.
+  try {
+    saveHealth(root, attempt->initialStatus());
+    saveHealth(root, attempt->observe());
+  } catch (...) {}
+  return 0;
 }
 }
 
@@ -113,12 +170,13 @@ int main(int argc, char **argv) {
   const QString operation = args.takeFirst();
   const bool launchOperation = operation == QLatin1String("--verify-installed") ||
       operation == QLatin1String("--launch-current");
-  if (launchOperation && !args.isEmpty()) return failure(QStringLiteral("INVALID_REQUEST"));
+  const bool healthOperation = operation == QLatin1String("--startup-status");
+  if ((launchOperation || healthOperation) && !args.isEmpty()) return failure(QStringLiteral("INVALID_REQUEST"));
   const QString channel = args.isEmpty() ? QStringLiteral("stable") : args.takeFirst();
   const QString expected = args.isEmpty() ? QString() : args.takeFirst();
   if (!QStringList{QStringLiteral("--check"), QStringLiteral("--prepare"),
       QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback"),
-      QStringLiteral("--verify-installed"), QStringLiteral("--launch-current")}.contains(operation) ||
+      QStringLiteral("--verify-installed"), QStringLiteral("--launch-current"), QStringLiteral("--startup-status")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel) ||
       (!expected.isEmpty() && operation != QLatin1String("--apply-prepared") && operation != QLatin1String("--rollback")) ||
       (operation == QLatin1String("--rollback") && expected.isEmpty())) return failure(QStringLiteral("INVALID_REQUEST"));
@@ -142,6 +200,9 @@ int main(int argc, char **argv) {
     }
     catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
   }
+  // Advisory read-only query: it must also work while a bounded observer holds
+  // the activation lock, or current.json is malformed. It is never admission.
+  if (healthOperation) return startupStatus(root.absolutePath());
   gsw::NativeInstallationLock lock(root.absolutePath(), launchOperation
       ? gsw::NativeInstallationLock::OpenMode::RequireExisting
       : gsw::NativeInstallationLock::OpenMode::CreateIfMissing);

@@ -8,6 +8,19 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network Test)
 include(CTest)
 set(GSW_TRUST_LIBRARY "" CACHE FILEPATH "Exact independently built Rust static library")
 option(GSW_UPDATER_FIXTURE_BUILD "Build distinct test-only updater product" OFF)
+add_library(gsw_startup_health STATIC ../src/NativeStartupHealth.cpp ../src/NativeStartupHealth.h)
+target_include_directories(gsw_startup_health PUBLIC ../src)
+target_link_libraries(gsw_startup_health PUBLIC Qt6::Core)
+if(WIN32)
+  target_link_libraries(gsw_startup_health PRIVATE bcrypt advapi32 user32)
+  target_compile_definitions(gsw_startup_health PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+if(GSW_UPDATER_FIXTURE_BUILD)
+  target_compile_definitions(gsw_startup_health PRIVATE GSW_UPDATER_FIXTURE_BUILD=1)
+endif()
+if(MSVC)
+  target_compile_options(gsw_startup_health PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()
 add_library(gsw_update_download STATIC
   ../src/NativeUpdateDownload.cpp ../src/NativeUpdateDownload.h)
 target_include_directories(gsw_update_download PUBLIC ../src)
@@ -35,7 +48,7 @@ if(GSW_TRUST_LIBRARY)
   add_executable(gsw_native_update_helper ../src/NativeUpdateHelper.cpp
     ../src/NativeInstallation.cpp ../src/NativeInstallation.h)
   target_include_directories(gsw_native_update_helper PRIVATE ../third_party/nlohmann ../third_party/miniz)
-  target_link_libraries(gsw_native_update_helper PRIVATE gsw_update_trust_bridge)
+  target_link_libraries(gsw_native_update_helper PRIVATE gsw_update_trust_bridge gsw_startup_health)
   if(WIN32)
     target_link_libraries(gsw_native_update_helper PRIVATE Shell32 Ole32 Propsys User32 Uuid)
   endif()
@@ -64,7 +77,7 @@ if(GSW_UPDATER_FIXTURE_BUILD)
     string(TOLOWER "${label}" lower)
     qt_add_executable(gsw_update_application_fixture_${lower} WIN32
       ../tests/NativeUpdateApplicationFixture.cpp)
-    target_link_libraries(gsw_update_application_fixture_${lower} PRIVATE Qt6::Widgets)
+    target_link_libraries(gsw_update_application_fixture_${lower} PRIVATE Qt6::Widgets gsw_startup_health)
     target_compile_definitions(gsw_update_application_fixture_${lower} PRIVATE GSW_UPDATE_FIXTURE_LABEL="${label}")
     set_target_properties(gsw_update_application_fixture_${lower} PROPERTIES
       OUTPUT_NAME "Gaussian Scene Workbench"
@@ -76,7 +89,7 @@ if(GSW_UPDATER_FIXTURE_BUILD)
   # Compile the exact production launcher/installation sources. There is no
   # test root/feed/key override in this executable: root is still parent/bin.
   qt_add_executable(gsw_update_fixture_launcher WIN32 ../src/NativeLauncher.cpp ../src/NativeInstallation.cpp)
-  target_link_libraries(gsw_update_fixture_launcher PRIVATE Qt6::Core Shell32 Ole32 Propsys User32 Uuid)
+  target_link_libraries(gsw_update_fixture_launcher PRIVATE Qt6::Core gsw_startup_health Shell32 Ole32 Propsys User32 Uuid)
   target_compile_definitions(gsw_update_fixture_launcher PRIVATE
     GSW_APP_USER_MODEL_ID="Fubukisama.GaussianSceneWorkbench.UpdateFixture"
     GSW_UPDATER_FIXTURE_BUILD=1 NOMINMAX WIN32_LEAN_AND_MEAN)

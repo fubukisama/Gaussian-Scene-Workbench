@@ -270,6 +270,7 @@ public:
   [[nodiscard]] QString sceneCoordinateDetail() const;
   void refreshActiveSceneMetadata();
   [[nodiscard]] bool infiniteGridRenderingAvailable() const;
+  [[nodiscard]] bool startupBaseRenderingAvailable() const;
   [[nodiscard]] TrainingGpuPreviewCapability
   trainingGpuPreviewCapability() const {
     return mTrainingGpuPreviewCapability;

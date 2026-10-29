@@ -3,6 +3,7 @@
 #include "ManagedName.h"
 #include "AppLanguage.h"
 #include "NativeUpdateUi.h"
+#include "NativeStartupHealth.h"
 #include "WindowUi.h"
 #include "WorkbenchIcons.h"
 #include "WorkspaceDropPlan.h"
@@ -920,6 +921,15 @@ MainWindow::MainWindow(QWidget *parent)
 
   mViewport = new NativeViewport(this);
   setCentralWidget(mViewport);
+  // A launch is not a health claim. Acknowledge only the first actual composed
+  // base viewport, without waiting for a model, changing focus, or starting work.
+  connect(mViewport, &QOpenGLWidget::frameSwapped, this, [this] {
+    if (property("gswStartupHealthReported").toBool() || !isVisible() ||
+        !mViewport->isValid() || mViewport->renderedFrameSerial() == 0 ||
+        !mViewport->startupBaseRenderingAvailable()) return;
+    setProperty("gswStartupHealthReported", true);
+    reportNativeStartupReady(quintptr(winId()), "main-window-base-viewport");
+  });
   mViewport->setAcceptDrops(true);
   mViewport->installEventFilter(this);
   setAcceptDrops(true);

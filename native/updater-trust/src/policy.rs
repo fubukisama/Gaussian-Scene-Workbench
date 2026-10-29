@@ -8,6 +8,8 @@ use url::Url;
 pub type Result<T> = std::result::Result<T, &'static str>;
 pub const METADATA_LIMIT: usize = 1024 * 1024;
 pub const DESCRIPTOR_LIMIT: usize = 256 * 1024;
+#[cfg(feature = "production-profile")]
+pub const PRODUCTION_PRODUCT: &str = "Fubukisama.GaussianSceneWorkbench.Native";
 #[cfg(feature = "fixture-profile")]
 pub const FIXTURE_PRODUCT: &str = "Fubukisama.GaussianSceneWorkbench.UpdateFixture";
 
@@ -42,7 +44,7 @@ pub struct Channel {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[cfg_attr(not(feature = "fixture-profile"), allow(dead_code))]
+#[cfg_attr(not(any(feature = "fixture-profile", feature = "production-profile")), allow(dead_code))]
 pub struct Profile {
     pub schema: String,
     pub product: String,
@@ -55,23 +57,42 @@ pub struct Profile {
 }
 impl Profile {
     pub fn compiled() -> Result<Option<Self>> {
-        #[cfg(not(feature = "fixture-profile"))] { Ok(None) }
-        #[cfg(feature = "fixture-profile")] {
+        #[cfg(not(any(feature = "fixture-profile", feature = "production-profile")))] { Ok(None) }
+        #[cfg(any(feature = "fixture-profile", feature = "production-profile"))] {
+            #[cfg(feature = "fixture-profile")]
             let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/fixture-profile.json"));
+            #[cfg(feature = "production-profile")]
+            let bytes = include_bytes!(concat!(env!("OUT_DIR"), "/production-profile.json"));
             let value = strict_json(bytes, 2 * 1024 * 1024).map_err(|_| "PROFILE_INVALID")?;
+            // Even a null fixture CA field is forbidden in a production input.
+            // No runtime path, environment variable or request can supply data.
+            #[cfg(feature = "production-profile")]
+            if value.as_object().is_some_and(|object| object.contains_key("fixtureCaPem")) {
+                return Err("PROFILE_INVALID");
+            }
             let profile: Self = serde_json::from_value(value).map_err(|_| "PROFILE_INVALID")?;
-            profile.validate()?;
+            profile.validate().map_err(|_| "PROFILE_INVALID")?;
             Ok(Some(profile))
         }
     }
-    #[cfg(feature = "fixture-profile")]
+    #[cfg(any(feature = "fixture-profile", feature = "production-profile"))]
     fn validate(&self) -> Result<()> {
-        if self.schema != "gsw.update_profile/1" || self.product != FIXTURE_PRODUCT || self.platform != "windows-x64"
+        #[cfg(feature = "fixture-profile")]
+        let product = FIXTURE_PRODUCT;
+        #[cfg(feature = "production-profile")]
+        let product = PRODUCTION_PRODUCT;
+        if self.schema != "gsw.update_profile/1" || self.product != product || self.platform != "windows-x64"
             || self.channels.len() != 2 || !self.channels.contains_key("stable") || !self.channels.contains_key("preview")
             || self.approved_hosts.is_empty() || self.approved_hosts.len() > 16
             || self.approved_hosts.iter().any(|h| h.is_empty() || h.len() > 253 || h != &h.to_ascii_lowercase()
                 || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
-            || self.fixture_ca_pem.as_ref().is_none_or(|v| v.is_empty() || v.len() > 64 * 1024) {
+            || self.approved_hosts.iter().collect::<BTreeSet<_>>().len() != self.approved_hosts.len() {
+            return Err("PROFILE_INVALID");
+        }
+        #[cfg(feature = "fixture-profile")]
+        if self.fixture_ca_pem.as_ref().is_none_or(|v| v.is_empty() || v.len() > 64 * 1024) { return Err("PROFILE_INVALID"); }
+        #[cfg(feature = "production-profile")]
+        if self.fixture_ca_pem.is_some() || self.approved_hosts.iter().any(|h| !production_host(h)) {
             return Err("PROFILE_INVALID");
         }
         for channel in self.channels.values() {
@@ -81,6 +102,17 @@ impl Profile {
             }
         }
         validate_metadata(&self.seed_root, "root")?;
+        #[cfg(feature = "production-profile")]
+        {
+            if self.seed_root["signed"]["roles"]["root"]["threshold"].as_u64().is_none_or(|n| n < 2) {
+                return Err("PROFILE_INVALID");
+            }
+            // Tough checks canonical key IDs, schema and the distinct signing
+            // keys meeting the root role threshold. Never invent crypto here.
+            let root: tough::schema::Signed<tough::schema::Root> = serde_json::from_value(self.seed_root.clone())
+                .map_err(|_| "PROFILE_INVALID")?;
+            root.signed.verify_role(&root).map_err(|_| "PROFILE_INVALID")?;
+        }
         Ok(())
     }
     pub fn url(&self, value: &str) -> Result<Url> {
@@ -98,6 +130,17 @@ impl Profile {
     pub fn identity(&self) -> Result<String> {
         Ok(format!("{}:{}:{}", self.product, self.platform, sha256(&self.seed_bytes()?)))
     }
+}
+
+#[cfg(feature = "production-profile")]
+fn production_host(host: &str) -> bool {
+    // Production accepts DNS names only: URL's host parser also rejects odd
+    // numeric IPv4 forms that std::net::IpAddr would not recognize.
+    matches!(url::Host::parse(host), Ok(url::Host::Domain(domain)) if domain == host)
+        && host.contains('.') && host != "localhost" && !host.ends_with(".localhost")
+        && ![".local", ".internal", ".lan"].iter().any(|suffix| host.ends_with(suffix))
+        && host.split('.').all(|label| !label.is_empty() && label.len() <= 63
+            && !label.starts_with('-') && !label.ends_with('-'))
 }
 
 pub fn safe_token(value: &str) -> bool {

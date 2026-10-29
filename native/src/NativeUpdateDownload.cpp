@@ -138,9 +138,10 @@ public:
   bool active = false, finishing = false, headersAccepted = false, ownsPart = false;
   bool ownsResume = false, resumeValid = false, resumed = false;
   QByteArray entityTag;
+  QUrl activeUrl;
   qint64 bytes = 0, requestOffset = 0;
-  quint64 generation = 0;
-  int httpStatus = 0;
+  quint64 generation = 0, responseSerial = 0;
+  int httpStatus = 0, redirects = 0;
 
   explicit Impl(NativeUpdateDownload *owner) : q(owner), manager(owner), deadline(owner) {
     deadline.setSingleShot(true);
@@ -285,7 +286,7 @@ public:
         policy.inactivityTimeoutMs < 100 || policy.inactivityTimeoutMs > 600000 ||
         policy.totalTimeoutMs < 100 || policy.totalTimeoutMs > 3600000 ||
         policy.maximumAttempts < 1 || policy.maximumAttempts > 5 ||
-        policy.maximumRedirects < 0 || policy.maximumRedirects > 5 ||
+        policy.maximumRedirects < 0 || policy.maximumRedirects > 3 ||
         policy.retryDelayMs < 0 || policy.retryDelayMs > 5000 ||
         !policy.sslConfiguration.backendConfiguration().isEmpty()) {
       finish(QStringLiteral("download_policy_invalid")); return;
@@ -314,8 +315,17 @@ public:
       beginVerify();
       return;
     }
+    issueRequest(request.url);
+  }
+
+  void issueRequest(const QUrl &url) {
+    if (!active) return;
+    if (!approved(url)) { finish(QStringLiteral("download_redirect_forbidden")); return; }
+    activeUrl = url;
+    headersAccepted = false;
+    httpStatus = 0;
     requestOffset = bytes;
-    QNetworkRequest wire(request.url);
+    QNetworkRequest wire(url);
     wire.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     wire.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
     wire.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
@@ -343,17 +353,39 @@ public:
     reply = manager.get(wire);
     reply->setReadBufferSize(64 * 1024);
     auto *current = reply.data();
-    QObject::connect(current, &QNetworkReply::metaDataChanged, q, [this, current] {
-      if (active && reply == current) acceptHeaders();
+    const auto serial = ++responseSerial;
+    QObject::connect(current, &QNetworkReply::metaDataChanged, q, [this, current, serial] {
+      if (active && reply == current && responseSerial == serial) acceptHeaders();
     });
-    QObject::connect(current, &QNetworkReply::readyRead, q, [this, current] {
-      if (active && reply == current) consume();
+    QObject::connect(current, &QNetworkReply::readyRead, q, [this, current, serial] {
+      if (active && reply == current && responseSerial == serial) consume();
     });
-    QObject::connect(current, &QNetworkReply::sslErrors, q, [this, current](const QList<QSslError> &) {
-      if (active && reply == current) finish(QStringLiteral("download_tls_failed"));
+    QObject::connect(current, &QNetworkReply::sslErrors, q, [this, current, serial](const QList<QSslError> &) {
+      if (active && reply == current && responseSerial == serial) finish(QStringLiteral("download_tls_failed"));
     });
-    QObject::connect(current, &QNetworkReply::finished, q, [this, current] {
-      if (active && reply == current) received();
+    QObject::connect(current, &QNetworkReply::finished, q, [this, current, serial] {
+      if (active && reply == current && responseSerial == serial) received();
+    });
+  }
+
+  void followRedirect() {
+    if (redirects >= policy.maximumRedirects) { finish(QStringLiteral("download_redirect_limit")); return; }
+    const auto location = reply->rawHeader("Location");
+    if (location.isEmpty() || location.size() > 8192) { finish(QStringLiteral("download_redirect_invalid")); return; }
+    const auto relative = QUrl::fromEncoded(location, QUrl::StrictMode);
+    if (!relative.isValid()) { finish(QStringLiteral("download_redirect_invalid")); return; }
+    const auto target = activeUrl.resolved(relative);
+    if (!approved(target)) { finish(QStringLiteral("download_redirect_forbidden")); return; }
+    ++redirects;
+    QObject::disconnect(reply, nullptr, q, nullptr);
+    auto *previous = reply.data(); reply = nullptr;
+    const auto serial = ++responseSerial;
+    previous->abort(); previous->deleteLater();
+    const auto token = generation;
+    // Rebuild a new identity-encoded request after the old signal completes.
+    // No cookies, credentials or response-controlled headers are forwarded.
+    QTimer::singleShot(0, q, [this, target, token, serial] {
+      if (active && generation == token && responseSerial == serial) issueRequest(target);
     });
   }
 
@@ -362,10 +394,13 @@ public:
     if (headersAccepted) return true;
     httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (httpStatus < 200) return false;
-    if (httpStatus != 200 && httpStatus != 206) { finish(QStringLiteral("download_http_error")); return false; }
     if (!reply->attribute(QNetworkRequest::ConnectionEncryptedAttribute).toBool()) {
       finish(QStringLiteral("download_tls_failed")); return false;
     }
+    if (httpStatus == 301 || httpStatus == 302 || httpStatus == 303 || httpStatus == 307 || httpStatus == 308) {
+      followRedirect(); return false;
+    }
+    if (httpStatus != 200 && httpStatus != 206) { finish(QStringLiteral("download_http_error")); return false; }
     const auto encoding = reply->rawHeader("Content-Encoding").trimmed().toLower();
     if (!encoding.isEmpty() && encoding != "identity") {
       finish(QStringLiteral("download_content_encoding")); return false;
@@ -421,9 +456,10 @@ public:
   void received() {
     const QPointer<NativeUpdateDownload> alive(q);
     const auto token = generation;
+    const auto serial = responseSerial;
     consume();
     if (!alive) return;
-    if (token != generation) return;
+    if (token != generation || serial != responseSerial) return;
     if (!active || !reply) return;
     if (reply->error() != QNetworkReply::NoError) { finish(networkCode(reply->error())); return; }
     if (!headersAccepted || bytes != request.expectedLength || !part.flush() || part.size() != bytes) {
@@ -479,6 +515,7 @@ bool NativeUpdateDownload::start(const NativeUpdateDownloadRequest &request, con
   m->request = request; m->policy = policy; m->active = true;
   m->headersAccepted = false; m->ownsPart = false; m->bytes = 0; m->httpStatus = 0;
   m->ownsResume = false; m->resumeValid = false; m->resumed = false; m->requestOffset = 0; m->entityTag.clear();
+  m->redirects = 0; m->activeUrl = {};
   const auto token = ++m->generation;
   QTimer::singleShot(0, this, [this, token] { if (m->active && token == m->generation) m->begin(); });
   return true;
