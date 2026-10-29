@@ -1,6 +1,17 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **VERIFIED_7F76_CLOUD_AND_PACKAGE / NEWER_INTEGRATION_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **VERIFIED_7F76_PACKAGE_AND_A105_CLOUD / NEW_UI_REGRESSIONS_RUNNING / PERFORMANCE_REANALYSED_INCONCLUSIVE / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+
+## 0A. 2026-10-29 后续实际验收增量
+
+- `a105f53ee98e4bb5e8a24db807a2cf49f1ad711e` / [40811998263](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40811998263) 三个 job 最终 SUCCESS。直接 Qt 日志确认4 bootstrap、175 CTests（2275.73s）、安装适配器及真实产品回读通过：3033文件、1351后端记录、1572源码记录、28隐藏文件，EXE `a8eaa664b1ef5dec850ea16f6facfc5d3ccd06c9c9547c04b27b982951da06e6`。只读取日志，没有重复下载非最新的大产品包，也没有声称本机已静态核对该包。更新的 updater 源码仍需自己的接受。
+- `6bfc08c` / run40817223091 的 Qt bootstrap 又在 `native_infinite_reference_grid` **15.01s TIMEOUT**，没有测试输出。直接日志已保留；原因仍未知，不用旧单次未复现诊断将其关闭，不延长15s/内部10s，也不重播旧二进制刷绿。阶段留证方案单独记录，尚无产品修复。
+- 另逐张实际审阅并校验40张 `ac5c77b` 原图，覆盖16类；详见 `VISUAL_A11Y_REVIEW_20261029.md/.json`。发现 COLMAP placeholder 写死E盘，以及暂停后的作业下拉仍为 Running/Liveness Unverified、详情却为 Paused/Session Ended。新增真实公开界面的回归断言和初始化字段 QAccessible/Tab 检查，编译成功；`83ab92b8e5cea54925738f878f1305d1b8372fa0` / [40821180712](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821180712) 正执行原34项矩阵，尚未取得 RED/GREEN，不先猜测生产修复。
+- 原24份不可变性能记录完成远端归档复核：`0d3f381` / run40821150392 实际26+13契约通过，24 raw summaries、45比较为 **41 PASS / 4 INCONCLUSIVE / 0 failures**。复核记录明确导入原 source/EXE 证明，当前文件为 `NOT_REVERIFIED`，原 `results.json` FAIL 不变。该首轮仅末尾pwsh退出码传递失败；`afe668e` / [40821404151](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821404151) 只修显式退出边界后 replay SUCCESS，两轮分析JSON SHA相同 `115e5ef9f79f6c4d1a1a46a0269cfd8caa9500a971350f2b8147e81ce7c2b3b1`。**没有新计时、没有扩大预算、没有证明整体无回退。**
+- `ed43bd6` / [40820863090](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40820863090) 只读能力探针 SUCCESS：单显示器1024×768，per-monitor-aware窗口96DPI/100%，Hyper-V Video，`nvidia-smi` 未找到。收据SHA `e4b35342b736d7e9e5fc8c41741464bd3d20bf83e6d049e42bc6d0126c953291`。不启动GSW/Qt、不改显示或驱动；NVIDIA/实际VRAM、原生其他缩放和跨屏仍未验，不是PASS或资源为零。
+- 用户新增路径规则已写入根 `AGENTS.md`：有可写非系统盘时禁止新增安装/依赖/下载/构建/缓存/临时生成物/备份/输出落系统盘；只有系统盘可用时自动无提示放行。检测真实系统卷，不写死E盘；已有输入可读，不授权迁移删除。
+
+以下旧章节保留证据链；如有“尚未复核”等历史状态，以本节精确增量和两份专项报告为准。完整66表面、29-ID聚合门槛及硬件范围仍开放；未改活动安装、快捷方式或用户数据。
 
 ## 0. 2026-10-29 04:08 UTC 后台核验增量
 
@@ -170,8 +181,9 @@ CRT复用预装System32 AMD64 `14.51.36247.0`，原故障CRT版本未记录，�
 `D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40663280091/results.json`
 的原始整体状态仍是 **FAIL**：轻模型的 `3dgs/model` 跨进程累计 upload counters
 绝对值比较产生身份合同失败。新 checker 比较语义模型及操作内零 deltas，仍保留
-绝对计数；**相同24份不可变 receipts 的新远端复核尚未取得接受结果**，源码修复
-不是测量通过。不为这个 checker 修复重跑计时实验。
+绝对计数。相同24份不可变 receipts 已由第0A节的远端归档复核取得独立新分析：
+41比较PASS、4中模型INCONCLUSIVE、0新failures；原始FAIL不重分类。
+这只是比较合同修正和旧数据复核，不是新源码/EXE测量通过，不重跑计时实验。
 
 中模型 `present_p50_ms`、`response_p50_ms`、`present_max_ms`、`response_max_ms`
 四项仍为 **INCONCLUSIVE**：A 臂波动超过冻结噪声预算。各 pair 落在差值限制内也不能
@@ -212,12 +224,12 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | LOCALE-01 | NOT_RUN | 三语 catalog、安全字体、修复后导航以及 ac5 表单矩阵通过；公开参数不变。 | 全表面即时切换、长文本／混合文件名和 worker／模型状态保护仍有范围缺口。 |
 | A11Y-01 | NOT_RUN | focus inset、geometry、语义 icon 合同及按钮完整可用尺寸通过。 | 全表面 Tab / shortcut / tooltip / accessible name / disabled reason 仍未齐。 |
 | LIFE-01 | NOT_RUN | de764 UI cache 生命周期 PASS，持久队列／取消合同未删除。 | 当前窗口／任务重连和 MainWindow 嵌套完整续训 trust prompt 不能由独立 guard 图替代。 |
-| PERF-01 | NOT_RUN | 24有效 receipts 和空场景／局部 overlay 子指标保留；阈值未变。 | 原始整体 FAIL、新 checker 同 receipts 复核未接受；中模型4 INCONCLUSIVE。 |
+| PERF-01 | NOT_RUN | 24有效 receipts 远端归档复核完成，41比较PASS/4 INCONCLUSIVE/0新failures；原始FAIL与阈值保留。 | 4项中模型噪声仍未接受；旧数据复核不是最新源码/EXE测量或整体无回退证明。 |
 | PERF-02 | NOT_RUN | 有效空闲／独立 cache 生命周期部分通过；局部 CPU / requested GPU 上限记录存在。 | 实际 driver VRAM／GPU timing、暗色、用户 NVIDIA 等仍未测。 |
 | PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
 | PKG-01 | PASS | **7f76候选**真实产品回读、源码/EXE/Setup清单及本机静态边界核验通过，详见第0节；旧a539失败保留。 | 不向更新整合源码继承，不包含本机启动/安装、签名或完整性能接受。 |
 | DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
-| CLOUD-01 | NOT_RUN | **7f76完整三job SUCCESS**；旧ac5/980失败和修复链保留。 | 后续8e9/a105整合源码仍需自己的完整结果；聚合门槛不把已测候选重新标成最新HEAD。 |
+| CLOUD-01 | NOT_RUN | **7f76及a105各自完整三job SUCCESS**；旧失败和修复链保留。 | 更新整合源码仍需自己的完整结果；6bfc grid超时保留，83ab UI回归正在执行；不跨源码继承。 |
 
 ## 8. 早期导航修复与来源边界
 
@@ -253,8 +265,8 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
    不把已接受的历史候选改标成最新HEAD，不重新下载已有完整证据。
 3. 完成尚未签收的表面、视觉、无障碍及 provider／硬件／OS支持边界；已通过的16类矩阵
    和3处修复不再写成待导入，也不扩张为全部UI完成。
-4. 旧 performance receipts 的 checker 修复仅做远端复核；中模型噪声仍独立INCONCLUSIVE，
-   不扩大预算或反复计时寻求绿灯。
+4. 旧 performance receipts 远端复核已完成（第0A节），不重复计时或扩大预算；中模型4项仍独立INCONCLUSIVE，
+   不将replay作业SUCCESS当作完整性能通过。
 5. 只有精确候选相关门槛真正闭环后，按 `docs/NATIVE_UPDATES.md` 生成实际完整接受凭证，
    使用 managed publisher，再独立读回 current / active EXE / recognized shortcuts。
    普通更新不改 bootstrap，不重复迁移入口、不关闭程序；固定目录Setup为独立adapter。
