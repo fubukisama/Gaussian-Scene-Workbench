@@ -5,6 +5,11 @@
 #include "../third_party/qt-process-quote/QtProcessQuote.h"
 #include <QCoreApplication>
 #include <QDir>
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QFile>
+#endif
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QRegularExpression>
@@ -221,6 +226,37 @@ bool canonicalCreated(const QByteArray &bytes, const NativeLaunchPlan &plan) {
       record.value("code") == QLatin1String("PROCESS_CREATED") &&
       record.value("buildId") == plan.version && record.value("executableSha256") == plan.executableSha256;
 }
+
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+void traceHelperExchange(const char *phase, const NativeLaunchPlan &plan,
+    HANDLE helper, DWORD helperPid, bool processCreation,
+    const QByteArray &response, const QElapsedTimer &clock) noexcept {
+  try {
+    const auto marker = qEnvironmentVariable("GSW_UPDATE_FIXTURE_MARKER");
+    if (marker.isEmpty() || !updatepaths::logicalLocalPath(marker)) return;
+    const bool created = processCreation && canonicalCreated(response, plan);
+    const bool signalled = WaitForSingleObject(helper, 0) == WAIT_OBJECT_0;
+    DWORD exitCode = STILL_ACTIVE;
+    const bool exitKnown = GetExitCodeProcess(helper, &exitCode);
+    QJsonObject record{{"schema", "gsw.fixture_launch_transport_trace/1"}, {"testOnly", true},
+      {"phase", QLatin1String(phase)}, {"callerPid", double(GetCurrentProcessId())},
+      {"helperPid", double(helperPid)}, {"helperCreationTime", creationTime(helper)},
+      {"helperImage", imagePath(helper)}, {"helperSignalled", signalled},
+      {"helperExitKnown", exitKnown}, {"helperExitCode", double(exitCode)},
+      {"buildId", plan.version}, {"executableSha256", plan.executableSha256},
+      {"processCreation", processCreation}, {"canonicalCreated", created},
+      {"responseBytes", double(response.size())}, {"elapsedMs", double(clock.elapsed())},
+      {"utcMs", double(QDateTime::currentMSecsSinceEpoch())}};
+    // Copy only a fully validated five-field record, never arbitrary output.
+    if (created) record.insert(QStringLiteral("creationResponse"), QJsonDocument::fromJson(response).object());
+    QFile file(marker + QStringLiteral(".launcher-trace.jsonl"));
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+      file.write(QJsonDocument(record).toJson(QJsonDocument::Compact) + '\n');
+      file.flush();
+    }
+  } catch (...) {}
+}
+#endif
 #endif
 } // namespace
 
@@ -367,6 +403,9 @@ bool nativeStartupHelperExchange(const QString &program, const NativeLaunchPlan 
   if (!response || intent.size() > 64 * 1024) return false;
   response->clear();
 #ifdef Q_OS_WIN
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  QElapsedTimer exchangeClock; exchangeClock.start();
+#endif
   SECURITY_ATTRIBUTES inherited{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
   HANDLE inputRead = INVALID_HANDLE_VALUE, inputWrite = INVALID_HANDLE_VALUE;
   HANDLE outputRead = INVALID_HANDLE_VALUE, outputWrite = INVALID_HANDLE_VALUE;
@@ -397,6 +436,10 @@ bool nativeStartupHelperExchange(const QString &program, const NativeLaunchPlan 
   if (!createProcess(program, arguments, QFileInfo(program).absolutePath(), plan.environment, &startup.StartupInfo,
       CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, true, &info)) return false;
   Handle process(info.hProcess), primaryThread(info.hThread);
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  traceHelperExchange("helper_created", plan, process.get(), info.dwProcessId,
+      processCreation, {}, exchangeClock);
+#endif
   if (creationUnconfirmed) *creationUnconfirmed = processCreation;
   childInput.reset(); childOutput.reset(); childError.reset();
   struct Writer final { Handle pipe; Handle done; QByteArray bytes; std::atomic_bool ok{false}; };
@@ -464,6 +507,10 @@ bool nativeStartupHelperExchange(const QString &program, const NativeLaunchPlan 
     else response->resize(old);
   }
   const bool created = processCreation && canonicalCreated(*response, plan);
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  traceHelperExchange("helper_response", plan, process.get(), info.dwProcessId,
+      processCreation, *response, exchangeClock);
+#endif
   if (created) {
     received = true;
     if (creationUnconfirmed) *creationUnconfirmed = false;

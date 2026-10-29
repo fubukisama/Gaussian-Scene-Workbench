@@ -36,6 +36,46 @@ def write_json(path: Path, value):
         stream.write("\n")
 
 
+class ProcessDiagnostic:
+    """Read-only handle to one owned fixture process, never a PID-based kill."""
+    def __init__(self, pid):
+        self.pid = int(pid)
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        self.kernel.OpenProcess.restype = ctypes.c_void_p
+        self.kernel.GetProcessTimes.argtypes = [ctypes.c_void_p, *([ctypes.c_void_p] * 4)]
+        self.kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        self.kernel.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                                          ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_ulong)]
+        self.kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        self.kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        self.handle = self.kernel.OpenProcess(0x00101000, False, self.pid)
+        self.open_error = ctypes.get_last_error() if not self.handle else None
+
+    def snapshot(self):
+        value = {"pid": self.pid, "opened": bool(self.handle)}
+        if not self.handle:
+            value["openError"] = self.open_error
+            return value
+        times = [(ctypes.c_ulong * 2)() for _ in range(4)]
+        if self.kernel.GetProcessTimes(self.handle, *[ctypes.byref(row) for row in times]):
+            value["processCreationTime"] = f"{(times[0][1] << 32) | times[0][0]:016x}"
+            value["processExitTime"] = f"{(times[1][1] << 32) | times[1][0]:016x}"
+        exit_code = ctypes.c_ulong()
+        if self.kernel.GetExitCodeProcess(self.handle, ctypes.byref(exit_code)):
+            value["exitCode"] = exit_code.value
+        value["signalled"] = self.kernel.WaitForSingleObject(self.handle, 0) == 0
+        image, length = ctypes.create_unicode_buffer(32768), ctypes.c_ulong(32768)
+        if self.kernel.QueryFullProcessImageNameW(self.handle, 0, image, ctypes.byref(length)):
+            value["image"] = image.value
+        return value
+
+    def close(self):
+        if self.handle:
+            self.kernel.CloseHandle(self.handle)
+            self.handle = None
+
+
 class EndToEnd(unittest.TestCase):
     preparation: dict
     fixture: dict
@@ -83,6 +123,48 @@ class EndToEnd(unittest.TestCase):
         return {"schema": "gsw.native_launch_intent/1", "buildId": current["version"],
                 "executableSha256": current["executableSha256"], "arguments": [], "diagnostics": False}
 
+    def startup_diagnostic(self):
+        # Read-only public query, no network/trust mutation and no assertion.
+        # This is evidence collection, not a substitute for any acceptance gate.
+        try:
+            process = subprocess.run([str(self.helper), "--startup-status"], capture_output=True,
+                timeout=3, creationflags=subprocess.CREATE_NO_WINDOW)
+            if len(process.stdout) > 8192:
+                return {"queryError": "oversized_output"}
+            record = json.loads(process.stdout)
+            if record.get("schema") != "gsw.update_event/1" or record.get("phase") != "startup_status":
+                return {"queryExitCode": process.returncode, "queryError": "unexpected_record"}
+            attempt = record.get("attempt", {})
+            return {"queryExitCode": process.returncode, "code": record.get("code"),
+                "attempt": {key: attempt[key] for key in
+                    ("attemptId", "buildId", "executableSha256", "pid", "processCreationTime", "healthScope")
+                    if key in attempt}}
+        except Exception as error:
+            return {"queryError": type(error).__name__}
+
+    def save_launch_diagnostic(self, marker, observed, launcher, child, initial_status, started):
+        try:
+            safe_files = {}
+            for relative in ("current.json", "bootstrap.json", ".update-trust-anchor"):
+                path = self.installation / relative
+                safe_files[relative] = digest(path) if path.is_file() else None
+            status = self.startup_diagnostic()
+            process = child.snapshot() if child else None
+            if process and status.get("attempt", {}).get("processCreationTime"):
+                process["matchesAttemptBirth"] = (process.get("processCreationTime") ==
+                    status["attempt"]["processCreationTime"])
+            record = {"schema": "gsw.fixture_launch_diagnostic/1", "testOnly": True,
+                "formalGswAcceptance": False, "launcherExitCode": launcher.poll(),
+                "elapsedMs": round((time.monotonic() - started) * 1000),
+                "observedMarker": observed, "markerExists": marker.exists(),
+                "initialStartupStatus": initial_status, "startupStatus": status,
+                "child": process, "installationDigests": safe_files,
+                "trustDigests": tree_hashes(self.installation / "updates/trust"),
+                "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]}
+            write_json(Path(str(marker) + ".diagnostic.json"), record)
+        except Exception:
+            pass  # Diagnostics must not change the verdict or mask its assertion.
+
     def launch(self, label, arguments=(), diagnostics=False):
         launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
         plan = subprocess.run([str(launcher), "--print-launch-plan"], capture_output=True,
@@ -102,13 +184,23 @@ class EndToEnd(unittest.TestCase):
         launch_arguments = (["--diagnostics"] if diagnostics else []) + list(arguments)
         process = subprocess.Popen([str(launcher), *launch_arguments], env=environment, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+        child_diagnostic = None
+        diagnostic_started = time.monotonic()
+        initial_status = {}
+        record = {}
         try:
             self.assertEqual(process.wait(timeout=15), 0)
             deadline = time.monotonic() + 25
-            record = {}
+            initial_status = self.startup_diagnostic()
+            initial_pid = initial_status.get("attempt", {}).get("pid")
+            if (initial_status.get("attempt", {}).get("buildId") == build and
+                    isinstance(initial_pid, (int, float)) and 0 < initial_pid <= 4294967295):
+                child_diagnostic = ProcessDiagnostic(int(initial_pid))
             while time.monotonic() < deadline:
                 if marker.exists():
                     record = json.loads(marker.read_text(encoding="utf-8"))
+                    if child_diagnostic is None and isinstance(record.get("pid"), (int, float)):
+                        child_diagnostic = ProcessDiagnostic(int(record["pid"]))
                     if record.get("phase") == "normal_exit":
                         break
                 time.sleep(.05)
@@ -143,6 +235,10 @@ class EndToEnd(unittest.TestCase):
                                "formalGswAcceptance": False})
             return record
         finally:
+            self.save_launch_diagnostic(marker, record, process, child_diagnostic,
+                                        initial_status, diagnostic_started)
+            if child_diagnostic:
+                child_diagnostic.close()
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)

@@ -4,6 +4,8 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDateTime>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -36,17 +38,45 @@ protected:
 private:
   bool mPainted = false;
 };
-bool marker(const QString &path, const QJsonObject &record) {
+bool marker(const QString &path, const QJsonObject &record, QJsonObject *diagnostic = nullptr) {
   QSaveFile file(path);
   file.setDirectWriteFallback(false);
   const auto bytes = QJsonDocument(record).toJson(QJsonDocument::Compact);
-  return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+  const bool opened = file.open(QIODevice::WriteOnly);
+  const qint64 written = opened ? file.write(bytes) : -1;
+  const bool committed = written == bytes.size() && file.commit();
+  if (diagnostic) {
+    diagnostic->insert(QStringLiteral("opened"), opened);
+    diagnostic->insert(QStringLiteral("writtenBytes"), double(written));
+    diagnostic->insert(QStringLiteral("committed"), committed);
+    diagnostic->insert(QStringLiteral("fileError"), int(file.error()));
+  }
+  return committed;
+}
+void trace(const QString &path, const QElapsedTimer &clock, const char *phase,
+    QJsonObject fields = {}) {
+  // Remote-fixture diagnostics only. Separate from the polled atomic marker;
+  // never contains IPC capabilities, environment, repository URLs or user data.
+  fields.insert(QStringLiteral("schema"), QStringLiteral("gsw.update_fixture_trace/1"));
+  fields.insert(QStringLiteral("testOnly"), true);
+  fields.insert(QStringLiteral("pid"), double(QCoreApplication::applicationPid()));
+  fields.insert(QStringLiteral("phase"), QLatin1String(phase));
+  fields.insert(QStringLiteral("elapsedMs"), double(clock.elapsed()));
+  fields.insert(QStringLiteral("utcMs"), double(QDateTime::currentMSecsSinceEpoch()));
+  QFile file(path + QStringLiteral(".trace.jsonl"));
+  if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+    file.write(QJsonDocument(fields).toJson(QJsonDocument::Compact) + '\n');
+    file.flush();
+  }
 }
 }
 int main(int argc, char **argv) {
-  QApplication app(argc, argv);
   const QString path = qEnvironmentVariable("GSW_UPDATE_FIXTURE_MARKER");
   if (path.isEmpty() || !QDir::isAbsolutePath(path)) return 3;
+  QElapsedTimer clock; clock.start();
+  trace(path, clock, "main_enter");
+  QApplication app(argc, argv);
+  trace(path, clock, "application_constructed");
   const QString label = QString::fromLatin1(GSW_UPDATE_FIXTURE_LABEL);
   QWidget window;
   window.setWindowTitle(QString::fromLatin1("GSW isolated update fixture ") + label);
@@ -70,22 +100,39 @@ int main(int argc, char **argv) {
       {"diagnosticsRoot", QDir::fromNativeSeparators(qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR"))},
       {"qtVersion", QString::fromLatin1(qVersion())},
       {"platform", QGuiApplication::platformName()}};
+  trace(path, clock, "before_show");
   window.show();
+  trace(path, clock, "after_show");
   QTimer::singleShot(100, &app, [&] {
+    trace(path, clock, "ready_timer");
     shown = window.isVisible() && window.windowHandle();
     record.insert(QString::fromLatin1("windowShown"), shown);
     record.insert(QString::fromLatin1("viewportPainted"), surface->painted());
     record.insert(QString::fromLatin1("healthScope"), QString::fromLatin1("qt-fixture-window-surface"));
     record.insert(QString::fromLatin1("phase"), QString::fromLatin1("shown"));
-    if (!shown || !surface->painted() || !marker(path, record)) app.exit(4);
+    QJsonObject markerDiagnostic{{"windowShown", shown}, {"viewportPainted", surface->painted()}};
+    trace(path, clock, "before_shown_marker");
+    const bool written = shown && surface->painted() && marker(path, record, &markerDiagnostic);
+    trace(path, clock, "after_shown_marker", markerDiagnostic);
+    if (!written) app.exit(4);
     else {
+      trace(path, clock, "before_health_hook");
       gsw::reportNativeStartupReady(quintptr(window.winId()), "qt-fixture-window-surface");
-      QTimer::singleShot(150, &app, &QCoreApplication::quit);
+      trace(path, clock, "after_health_hook");
+      QTimer::singleShot(150, &app, [&] {
+        trace(path, clock, "quit_timer");
+        app.quit();
+      });
     }
   });
   const int result = app.exec();
+  trace(path, clock, "event_loop_returned", {{"exitCode", result}});
   record.insert(QString::fromLatin1("phase"), QString::fromLatin1("normal_exit"));
   record.insert(QString::fromLatin1("exitCode"), result);
-  if (!shown || result != 0 || !marker(path, record)) return 4;
+  QJsonObject finalDiagnostic{{"windowShown", shown}, {"exitCode", result}};
+  trace(path, clock, "before_final_marker");
+  const bool finalWritten = shown && result == 0 && marker(path, record, &finalDiagnostic);
+  trace(path, clock, "after_final_marker", finalDiagnostic);
+  if (!finalWritten) return 4;
   return result;
 }

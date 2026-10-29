@@ -104,6 +104,34 @@ private slots:
       QCOMPARE(row.value("accept_encoding").toString(), QStringLiteral("identity"));
     }
   }
+  void retriesOneRealHttps503AndPublishesOnlyTheCompleteVerifiedBytes() {
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto r = request(QStringLiteral("/service-unavailable-once"), QStringLiteral("retry-503.bin"));
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write("previous verified destination"), qint64(29)); previous.close();
+    const auto currentPath = temporary.filePath(QStringLiteral("retry-current.json"));
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write("unchanged active version"), qint64(24)); current.close();
+    auto p = policy(); p.maximumAttempts = 2;
+    const auto result = download(r, p);
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+    QCOMPARE(read(currentPath), QByteArray("unchanged active version"));
+    QList<QJsonObject> requests;
+    for (const auto &line : read(logPath).mid(previousLogSize).split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (!row.isEmpty()) requests.append(row);
+    }
+    QCOMPARE(requests.size(), qsizetype(p.maximumAttempts));
+    for (const auto &row : requests) {
+      QCOMPARE(row.value("path").toString(), QStringLiteral("/service-unavailable-once"));
+      QVERIFY(row.value("range").toString().isEmpty());
+      QVERIFY(!row.value("cookie_present").toBool());
+      QVERIFY(!row.value("authorization_present").toBool());
+    }
+  }
   void cancellationRetainsOwnedStrongEtagPrefixAndResumesActualHttpsRange() {
     auto r = request(QStringLiteral("/slow"), QStringLiteral("resume.bin"));
     QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));

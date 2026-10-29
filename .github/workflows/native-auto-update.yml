@@ -121,6 +121,13 @@ jobs:
             production=false;productionLibraryConfigured=false;sourceCommit=(git rev-parse HEAD).Trim();
             sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
             runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/profile-evidence/source.json
+          if(Test-Path D:/gu/profile-rejection-evidence){
+            $destination="$PWD/native/profile-evidence/rejections"
+            New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            Get-ChildItem D:/gu/profile-rejection-evidence -File | Where-Object {
+              $_.Extension -in '.json','.log'
+            } | Copy-Item -Destination $destination
+          }
           if(Test-Path native/.profile-fixture/preparation.json){
             $prepared=Get-Content native/.profile-fixture/preparation.json -Raw | ConvertFrom-Json
             $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($prepared.serverPid)" -ErrorAction SilentlyContinue
@@ -133,10 +140,7 @@ jobs:
         if: always()
         with:
           name: native-auto-update-profile-evidence
-          path: |
-            native/profile-evidence/
-            D:/gu/profile-rejection-evidence/*.json
-            D:/gu/profile-rejection-evidence/*.log
+          path: native/profile-evidence/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
