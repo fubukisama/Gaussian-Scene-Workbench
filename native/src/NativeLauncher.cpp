@@ -46,12 +46,25 @@ int main(int argc, char **argv) {
     QTextStream(stderr) << diagnostic << '\n';
     return 2;
   }
+  QDir root(QCoreApplication::applicationDirPath());
+  root.cdUp();
+  if (!arguments.isEmpty() && arguments.first() == QLatin1String("--recover")) {
+    QString error;
+    if (arguments.size() == 1 && gsw::startNativeRecovery(root.absolutePath(), &error)) return 0;
+    const auto title = QCoreApplication::translate("Workbench", "版本恢复");
+    const auto text = gsw::nativeInstallationErrorText(QStringLiteral("managed_installation_recovery_unavailable"));
+#ifdef Q_OS_WIN
+    MessageBoxW(nullptr, reinterpret_cast<LPCWSTR>(text.utf16()),
+        reinterpret_cast<LPCWSTR>(title.utf16()), MB_OK | MB_ICONERROR);
+#else
+    QTextStream(stderr) << title << ": " << text << '\n';
+#endif
+    return 2;
+  }
   const bool planOnly = !arguments.isEmpty() && arguments.first() == QLatin1String("--print-launch-plan");
   if (planOnly) arguments.removeFirst();
   const bool diagnostics = !arguments.isEmpty() && arguments.first() == QLatin1String("--diagnostics");
   if (diagnostics) arguments.removeFirst();
-  QDir root(QCoreApplication::applicationDirPath());
-  root.cdUp();
   auto plan = gsw::resolveNativeInstallation(root.absolutePath(), diagnostics, arguments,
                                             QProcessEnvironment::systemEnvironment());
   if (planOnly) {

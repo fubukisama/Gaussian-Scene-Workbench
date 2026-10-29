@@ -8,7 +8,7 @@
 工程、素材、设置和训练状态不搬迁、不覆盖。此入口对 3DGS、2DGS、点云、网格及
 其他生成链路一致，不改变训练算法，也不将预览或 PLY 热启动宣称为优化器续训。
 
-本机托管目录：`E:\Apps\Gaussian Scene Workbench`。其他机器可选可写的非系统盘；
+托管目录示例：`D:\Apps\GSW`；实际位置以现有安装记录为准，不因示例自动迁移。其他机器可选可写的非系统盘；
 只有系统盘时支持现有 C: 目录。启动器和最初的 Qt 引导运行库保留在 `bin/`，
 各版本自带自己的运行库。普通版本更新不覆盖引导程序；更换引导协议需要单独迁移。
 原有安装向导仍使用固定安装目录，无须套用此版本目录结构。
@@ -49,7 +49,8 @@ remain available for rollback, and projects, assets, settings and training state
 The entry point is shared by 3DGS, 2DGS, point clouds, meshes and all generation pipelines;
 it changes no training algorithm or optimizer-state resume capability.
 
-The local managed root is `E:\Apps\Gaussian Scene Workbench`. Prefer a writable non-system
+The managed-root example is `D:\Apps\GSW`; the existing installation record remains authoritative,
+and an example never migrates it. Prefer a writable non-system
 drive elsewhere; existing C: locations are supported on system-drive-only devices. The
 bootstrap and its initial Qt runtime remain in `bin/`; each release owns its own runtime.
 Ordinary updates do not replace the bootstrap. A bootstrap-protocol migration is separate.
@@ -98,7 +99,7 @@ protocol migration remains a separate verified deployment.
 プロジェクト・素材・設定・学習状態は移動・上書きしません。3DGS・2DGS・点群・メッシュ・
 その他の生成経路で共通です。学習方式や最適化状態の再開機能を変更するものではありません。
 
-本機の管理先は `E:\Apps\Gaussian Scene Workbench` です。他の端末でも書込み可能な
+管理先の例は `D:\Apps\GSW` です。実際の場所は既存のインストール記録に従い、例を理由に移行しません。他の端末でも書込み可能な
 非システムドライブを優先し、C: のみの端末では既存ディレクトリーを利用できます。
 ランチャーと初期 Qt ランタイムは `bin/` に保持し、各バージョンは独自のランタイムを
 持ちます。通常更新でブートストラップを置換せず、プロトコル変更は別途移行します。
@@ -161,17 +162,17 @@ See [developer publisher contract](NATIVE_DEVELOPER_PUBLISHER.md). /
 # Exact-source full remote acceptance, not a scoped test claim.
 ./scripts/write_native_release_manifest.ps1 -PackageRoot $verifiedPackage `
   -SourceCommit $commit -AcceptanceProof $fullAcceptance -OutputPath $freshManifest
-./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
+./scripts/publish_native_installation.ps1 -InstallRoot 'D:\Apps\GSW' `
   -PackageRoot $verifiedPackage -FilesManifest $freshManifest -AcceptanceProof $fullAcceptance `
   -Archive $verifiedZip -Offer $localUnsignedOffer -DeveloperPublisher $developerPublisher
 # One-time migration/repair only: append -SynchronizeShortcuts, optionally
 # -ShortcutDirectories $identifiedNativeShortcutFolders.
 # Roll back without deleting either slot or closing a running application.
-./scripts/publish_native_installation.ps1 -InstallRoot 'E:\Apps\Gaussian Scene Workbench' `
+./scripts/publish_native_installation.ps1 -InstallRoot 'D:\Apps\GSW' `
   -ActivateVersion $previousInstalledVersion -Archive $originalWholeZip `
   -Offer $originalLocalUnsignedOffer -DeveloperPublisher $developerPublisher
 # Manual capture: native executable and arguments, no shell execution-policy override.
-& 'E:\Apps\Gaussian Scene Workbench\bin\Gaussian Scene Workbench Launcher.exe' --diagnostics
+& 'D:\Apps\GSW\bin\Gaussian Scene Workbench Launcher.exe' --diagnostics
 ```
 
 Evidence: `update-records/<id>/publication.json`, shortcut backups and `current-before.json`.

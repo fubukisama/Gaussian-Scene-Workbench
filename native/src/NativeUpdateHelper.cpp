@@ -110,7 +110,7 @@ QByteArray readLaunchInput() {
 }
 
 int installedLaunch(const QString &operation, const QString &root,
-    const gsw::activation::Json &intent, const gsw::NativeInstallationLock &lock) {
+    const gsw::activation::Json &intent) {
   using namespace gsw::activation;
   exactKeys(intent, {"schema", "buildId", "executableSha256", "arguments", "diagnostics"});
   if (string(intent.at("schema")) != QLatin1String("gsw.native_launch_intent/1") ||
@@ -127,14 +127,17 @@ int installedLaunch(const QString &operation, const QString &root,
   const bool create = operation == QLatin1String("--launch-current");
   const bool diagnostics = intent.at("diagnostics").get<bool>();
   if (!create && (!arguments.isEmpty() || diagnostics)) fail("INVALID_REQUEST");
+  auto lock = std::make_unique<gsw::NativeInstallationLock>(root,
+      gsw::NativeInstallationLock::OpenMode::RequireExisting);
+  if (!lock->locked()) return failure(lock->error());
   const auto pointer = parse(read(QDir(root).filePath(QStringLiteral("current.json")), 16384), 16384);
   exactKeys(pointer, {"schema", "version", "executableSha256"});
   if (string(pointer.at("schema")) != QLatin1String("gsw.native_active_version/1") ||
       buildId(pointer.at("version")) != expected || string(pointer.at("executableSha256")) != expectedHash)
     fail("LAUNCH_IDENTITY_CHANGED");
-  auto accepted = gsw::NativeUpdateTrustBridge::rollbackAdmission(root, QStringLiteral("stable"), expected, lock);
+  auto accepted = gsw::NativeUpdateTrustBridge::rollbackAdmission(root, QStringLiteral("stable"), expected, *lock);
   if (!accepted.ok) return failure(accepted.code);
-  const auto verified = gsw::NativeActivationCore::verifyInstalled(root, *accepted.update, lock);
+  const auto verified = gsw::NativeActivationCore::verifyInstalled(root, *accepted.update, *lock);
   if (!verified.ok) return failure(verified.code);
   if (verified.buildId != expected || verified.executableSha256 != expectedHash) fail("LAUNCH_IDENTITY_CHANGED");
   const auto fields = QJsonObject{{"buildId", expected}, {"executableSha256", expectedHash}};
@@ -152,10 +155,15 @@ int installedLaunch(const QString &operation, const QString &root,
   auto attempt = gsw::NativeStartupAttempt::start(plan, &startError);
   if (!attempt) return failure(startError);
   event(QStringLiteral("launched"), QStringLiteral("PROCESS_CREATED"), fields);
+  try { saveHealth(root, attempt->initialStatus()); } catch (...) {}
+  // The retained process handle now binds the optional observer to this exact
+  // birth/image. Authority and CreateProcess were under one uninterrupted
+  // installation lock; observing a live application must not hold that lock
+  // for another15s and reject otherwise-valid updates or launches.
+  lock.reset();
   // Exactly one canonical stdout result. Optional bounded observation must not
   // retract successful process creation, kill it, repoint current or restart it.
   try {
-    saveHealth(root, attempt->initialStatus());
     saveHealth(root, attempt->observe());
   } catch (...) {}
   return 0;
@@ -200,18 +208,16 @@ int main(int argc, char **argv) {
     }
     catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
   }
-  // Advisory read-only query: it must also work while a bounded observer holds
-  // the activation lock, or current.json is malformed. It is never admission.
+  // Advisory read-only query: it must also work while an updater holds the
+  // activation lock, or current.json is malformed. It is never admission.
   if (healthOperation) return startupStatus(root.absolutePath());
-  gsw::NativeInstallationLock lock(root.absolutePath(), launchOperation
-      ? gsw::NativeInstallationLock::OpenMode::RequireExisting
-      : gsw::NativeInstallationLock::OpenMode::CreateIfMissing);
-  if (!lock.locked()) return failure(lock.error());
   if (launchOperation) {
-    try { return installedLaunch(operation, root.absolutePath(), launchIntent, lock); }
+    try { return installedLaunch(operation, root.absolutePath(), launchIntent); }
     catch (const gsw::activation::Failure &error) { return failure(error.code); }
     catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
   }
+  gsw::NativeInstallationLock lock(root.absolutePath());
+  if (!lock.locked()) return failure(lock.error());
   auto cancellation = std::make_shared<std::atomic_bool>(false);
   // The sole detached input reader owns only its shared atomic. It never uses
   // QObjects or library state during process shutdown. EOF is not cancellation.

@@ -19,6 +19,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 SPEC = importlib.util.spec_from_file_location("gsw_owned_developer_fixture",
     Path(__file__).with_name("test_native_developer_publisher.py"))
@@ -142,7 +143,49 @@ def small_owned_volume(base: Path, evidence: Path):
                 assert not ctypes.windll.kernel32.GetLogicalDrives() & (1 << (ord(letter) - ord("A"))), "SPACE_OWNED_VHD_STILL_MOUNTED"
 
 
-def run(publisher: Path, base: Path, evidence: Path) -> None:
+def download_space_contract(driver: Path, volume: Path, base: Path, evidence: Path, root: Path) -> None:
+    server_root = base / "large-download-server"
+    ready = server_root / "ready.json"
+    server = subprocess.Popen([sys.executable, "-I", "-B",
+        str(Path(__file__).with_name("native_update_network_fixture.py")),
+        "--root", str(server_root), "--ready", str(ready), "--payload-mib", "64"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        deadline = time.monotonic() + 15
+        while not ready.is_file() and server.poll() is None and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert ready.is_file(), "SPACE_DOWNLOAD_SERVER_NOT_READY"
+        metadata = json.loads(ready.read_text(encoding="utf-8"))
+        assert metadata["testOnly"] is True and metadata["length"] == 64 * 1024 * 1024
+        destination = volume / "owned-update-download.zip"
+        old_package = b"old verified destination must not be overwritten by a space failure"
+        destination.write_bytes(old_package)
+        before = protected(root)
+        available = shutil.disk_usage(volume).free
+        result = subprocess.run([str(driver), str(ready), str(destination)], capture_output=True,
+            timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+        rows = [json.loads(line) for line in result.stdout.decode("utf-8").splitlines() if line.startswith("{")]
+        assert len(rows) == 1, "SPACE_DOWNLOAD_RESULT_MISSING"
+        response = rows[0]
+        requests = Path(metadata["requestLog"])
+        request_count = len(requests.read_bytes().splitlines()) if requests.is_file() else 0
+        FIXTURE.write_json(evidence / "download-space.json", {"schema": "gsw.update_download_space_evidence/1",
+            "testOnly": True, "expectedLength": metadata["length"], "availableBefore": available,
+            "providerIdentity": "owned-native-download-fixture-only-not-TUF", "exitCode": result.returncode,
+            "response": response, "httpRequestCount": request_count, "applicationStarted": False})
+        assert destination.read_bytes() == old_package, "SPACE_DOWNLOAD_DESTINATION_CHANGED"
+        assert protected(root) == before, "SPACE_DOWNLOAD_OLD_INSTALLATION_CHANGED"
+        assert result.returncode == 2 and response.get("ok") is False, "SPACE_DOWNLOAD_DID_NOT_REFUSE"
+        assert response.get("code") == "download_insufficient_space", response
+        assert response.get("receivedBytes") == 0 and request_count == 0, "SPACE_DOWNLOAD_DID_NOT_PREFLIGHT"
+    finally:
+        if server.poll() is None:
+            server.terminate()
+            server.wait(timeout=10)
+        server.stderr.close()
+
+
+def run(publisher: Path, download_driver: Path, base: Path, evidence: Path) -> None:
     contract = FIXTURE.Contract(publisher, evidence)
     name = "space-candidate-B"
     archive, offer, _ = FIXTURE.make_package(base, name)
@@ -172,10 +215,12 @@ def run(publisher: Path, base: Path, evidence: Path) -> None:
         before = protected(root)
         contract.publish(root, archive, offer, code="activation_insufficient_space")
         unchanged(root, before, name)
+        download_space_contract(download_driver, volume, base, evidence, root)
 
     FIXTURE.write_json(evidence / "acceptance.json", {"schema": "gsw.update_space_acceptance/1",
         "passed": True, "scope": "isolated-native-activation-resource-failures",
-        "cases": ["real-acl-denial-and-retry", "real-held-current-pointer-and-retry", "real-small-vhd-free-space"],
+        "cases": ["real-acl-denial-and-retry", "real-held-current-pointer-and-retry", "real-small-vhd-free-space",
+                  "known-length-download-preflight-on-real-constrained-volume"],
         "testOnly": True, "production": False, "publisherAuthenticated": False,
         "applicationStarted": False, "formalGswAcceptance": False})
 
@@ -184,6 +229,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--remote-fixture-only", action="store_true", required=True)
     parser.add_argument("--publisher", type=Path, required=True)
+    parser.add_argument("--download-fixture", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
@@ -195,7 +241,7 @@ def main() -> int:
     args.work_root.mkdir(parents=True)
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
-        run(args.publisher.absolute(), args.work_root.absolute(), args.evidence.absolute())
+        run(args.publisher.absolute(), args.download_fixture.absolute(), args.work_root.absolute(), args.evidence.absolute())
     except Exception as error:
         FIXTURE.write_json(args.evidence / "failure.json", {"schema": "gsw.update_space_failure/1",
             "passed": False, "testOnly": True, "errorType": type(error).__name__, "detail": str(error)[:1024]})

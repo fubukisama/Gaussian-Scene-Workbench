@@ -905,6 +905,18 @@ def main():
         capture_output=True, timeout=180)
     if deployed.returncode:
         raise ValueError("fixture_helper_deployment_failed")
+    # Test-owned bootstrap only: the issued helper is built after preparation.
+    # Bind its final fixed bin/runtime set before any trust or activation state
+    # exists. Never add files to an already-admitted installation here.
+    if (installation / ".update-trust-anchor").exists() or (installation / "updates/trust").exists():
+        raise ValueError("fixture_bootstrap_already_admitted")
+    bootstrap_path = installation / "bootstrap.json"
+    bootstrap = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+    if bootstrap.get("product") != "Fubukisama.GaussianSceneWorkbench.UpdateFixture" or bootstrap.get("protocol") != 2:
+        raise ValueError("fixture_bootstrap_identity_invalid")
+    bootstrap["files"] = [{"path": path.relative_to(installation).as_posix(), "size": path.stat().st_size,
+        "sha256": digest(path)} for path in sorted((installation / "bin").rglob("*")) if path.is_file()]
+    bootstrap_path.write_text(json.dumps(bootstrap, sort_keys=True), encoding="utf-8")
     EndToEnd.preparation, EndToEnd.installation = preparation, installation
     EndToEnd.fixture = json.loads(Path(preparation["fixture"]).read_text(encoding="utf-8"))
     EndToEnd.evidence, EndToEnd.helper = args.evidence.absolute(), helper

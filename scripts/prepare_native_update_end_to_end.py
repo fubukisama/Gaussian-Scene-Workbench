@@ -49,15 +49,21 @@ def package(root: Path, executable: Path, label: str, repo: Path, tool: Path,
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(repo / name, destination)
     source_root = root / "source"
-    (source_root / "native/tests").mkdir(parents=True)
-    shutil.copyfile(repo / "native/tests/NativeUpdateApplicationFixture.cpp",
-                    source_root / "native/tests/NativeUpdateApplicationFixture.cpp")
+    for relative in ("native/tests/NativeUpdateApplicationFixture.cpp", "native/src/NativeStartupHealth.cpp",
+            "native/src/NativeStartupHealth.h", "native/src/NativeInstallation.h", "native/src/NativeUpdateLocalPath.h",
+            "native/third_party/qt-process-quote/QtProcessQuote.h", "native/third_party/qt-process-quote/README.md",
+            "native/third_party/qt-process-quote/LICENSE.txt"):
+        destination = source_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / relative, destination)
     cmake = ("# Isolated Qt update fixture, not the GSW product\n"
         "cmake_minimum_required(VERSION 3.24)\nproject(GswUpdateFixture LANGUAGES CXX)\n"
-        "set(CMAKE_CXX_STANDARD 20)\nfind_package(Qt6 6.8 REQUIRED COMPONENTS Widgets)\n"
-        "qt_add_executable(fixture WIN32 tests/NativeUpdateApplicationFixture.cpp)\n"
-        "target_link_libraries(fixture PRIVATE Qt6::Widgets)\n"
-        f'target_compile_definitions(fixture PRIVATE GSW_UPDATE_FIXTURE_LABEL="{label}")\n'
+        "set(CMAKE_CXX_STANDARD 20)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\n"
+        "find_package(Qt6 6.8 REQUIRED COMPONENTS Core Widgets)\n"
+        "qt_add_executable(fixture WIN32 tests/NativeUpdateApplicationFixture.cpp src/NativeStartupHealth.cpp)\n"
+        "target_include_directories(fixture PRIVATE src)\n"
+        "target_link_libraries(fixture PRIVATE Qt6::Core Qt6::Widgets bcrypt advapi32 user32)\n"
+        f'target_compile_definitions(fixture PRIVATE GSW_UPDATE_FIXTURE_LABEL="{label}" GSW_UPDATER_FIXTURE_BUILD=1 NOMINMAX WIN32_LEAN_AND_MEAN)\n'
         'set_target_properties(fixture PROPERTIES OUTPUT_NAME "Gaussian Scene Workbench")\n'
         "if(MSVC)\n target_compile_options(fixture PRIVATE /utf-8 /Zc:__cplusplus)\nendif()\n")
     (source_root / "native/CMakeLists.txt").write_text(cmake, encoding="utf-8", newline="\n")
@@ -93,8 +99,16 @@ def prepare(args):
     launcher = installation / "bin/Gaussian Scene Workbench Launcher.exe"
     shutil.copyfile(args.launcher, launcher)
     deploy(args.windeployqt.absolute(), launcher, launcher.parent)
+    if args.recovery:
+        recovery = installation / "bin/GSW Update Fixture Recovery.exe"
+        if args.recovery.name != recovery.name:
+            raise ValueError("fixture_recovery_identity_invalid")
+        shutil.copyfile(args.recovery, recovery)
+        deploy(args.windeployqt.absolute(), recovery, recovery.parent)
     write_json(installation / "bootstrap.json", {"schema": "gsw.native_bootstrap/1", "protocol": 2,
-        "product": "Fubukisama.GaussianSceneWorkbench.UpdateFixture", "platform": "windows-x64"})
+        "product": "Fubukisama.GaussianSceneWorkbench.UpdateFixture", "platform": "windows-x64",
+        "files": [{"path": path.relative_to(installation).as_posix(), "size": path.stat().st_size,
+                   "sha256": digest(path)} for path in sorted((installation / "bin").rglob("*")) if path.is_file()]})
     (installation / "user-data").mkdir()
     (installation / "user-data/project-sentinel.gsw").write_bytes(b"owned-test-project-do-not-modify\x00\x01")
     (installation / "user-data/settings-sentinel.json").write_bytes(b'{"training":"paused","keep":true}\n')
@@ -139,6 +153,7 @@ def main():
     parser.add_argument("--fixture-a", type=Path, required=True)
     parser.add_argument("--fixture-b", type=Path, required=True)
     parser.add_argument("--launcher", type=Path, required=True)
+    parser.add_argument("--recovery", type=Path)
     parser.add_argument("--windeployqt", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-tree", required=True)

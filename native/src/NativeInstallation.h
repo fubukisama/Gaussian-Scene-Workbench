@@ -32,6 +32,9 @@ struct NativeLaunchPlan final {
 // verifier child. Starting holds the helper's installation lock through spawn.
 [[nodiscard]] bool verifyNativeInstallationLaunch(const NativeLaunchPlan &, QString *error);
 [[nodiscard]] bool startNativeInstallation(const NativeLaunchPlan &, bool diagnostics, QString *error);
+// Explicit independent entry; does not parse current.json or start a version.
+[[nodiscard]] bool startNativeRecovery(const QString &installationRoot, QString *error);
+[[nodiscard]] QString nativeRecoveryInstallationForApplication(const QString &applicationPath);
 [[nodiscard]] QString nativeInstallationErrorText(const QString &code);
 [[nodiscard]] QString managedInstallationForApplication(const QString &applicationPath);
 // Ensures pinning the running version keeps pointing to the stable launcher.

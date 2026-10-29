@@ -80,6 +80,14 @@ QString launcherFor(const QString &root) {
   return QDir(root).filePath(QLatin1String("bin/") + QString::fromLatin1(kNativeLauncherName));
 }
 
+QString recoveryName() {
+#ifdef GSW_UPDATER_FIXTURE_BUILD
+  return QString::fromLatin1("GSW Update Fixture Recovery.exe");
+#else
+  return QString::fromLatin1("Gaussian Scene Workbench Recovery.exe");
+#endif
+}
+
 bool holdOrdinaryFile(QFile &file, const QString &path) {
   if (!localOrdinaryTree(path) || !QFileInfo(path).isFile()) return false;
   file.setFileName(path);
@@ -220,6 +228,39 @@ bool startNativeInstallation(const NativeLaunchPlan &plan, bool diagnostics, QSt
   return managedLaunch(plan, diagnostics, true, error);
 }
 
+bool startNativeRecovery(const QString &root, QString *error) {
+  if (error) *error = QStringLiteral("managed_installation_recovery_unavailable");
+  const auto path = QDir(root).filePath(QStringLiteral("bin/") + recoveryName());
+  QFile recovery, launcher;
+  // An explicit recovery window is not an update grant. Only fixed ordinary
+  // bootstrap files are opened here; current.json may be absent or malformed.
+  if (!localOrdinaryTree(root) || !bootstrapProtocol(root) ||
+      !holdOrdinaryFile(launcher, launcherFor(root)) || !holdOrdinaryFile(recovery, path)) return false;
+  auto environment = QProcessEnvironment::systemEnvironment();
+  for (const auto *key : {"GSW_NATIVE_STARTUP_PIPE", "GSW_NATIVE_STARTUP_ATTEMPT",
+      "GSW_NATIVE_STARTUP_NONCE", "GSW_RENDER_DIAGNOSTICS_DIR"}) environment.remove(QLatin1String(key));
+  QProcess child;
+  child.setProgram(path); child.setWorkingDirectory(QFileInfo(path).absolutePath());
+  child.setProcessEnvironment(environment);
+  child.setStandardInputFile(QProcess::nullDevice());
+  child.setStandardOutputFile(QProcess::nullDevice()); child.setStandardErrorFile(QProcess::nullDevice());
+  if (!child.startDetached()) return false;
+  if (error) error->clear();
+  return true; // Window creation/health is not inferred from process creation.
+}
+
+QString nativeRecoveryInstallationForApplication(const QString &applicationPath) {
+  const QFileInfo application(applicationPath);
+  if (application.fileName() != recoveryName()) return {};
+  QDir bin = application.absoluteDir();
+  if (bin.dirName() != QLatin1String("bin") || !bin.cdUp()) return {};
+  const auto root = bin.absolutePath();
+  QFile executable, launcher;
+  if (!localOrdinaryTree(root) || !bootstrapProtocol(root) ||
+      !holdOrdinaryFile(executable, applicationPath) || !holdOrdinaryFile(launcher, launcherFor(root))) return {};
+  return root;
+}
+
 NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagnostics,
     const QStringList &arguments, const QProcessEnvironment &inherited) {
   NativeLaunchPlan result;
@@ -274,6 +315,8 @@ NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagn
 }
 
 QString nativeInstallationErrorText(const QString &code) {
+  if (code == QLatin1String("managed_installation_recovery_unavailable"))
+    return QCoreApplication::translate("Workbench", "无法打开版本恢复界面。请保留当前安装并联系维护者；工程和设置未修改。");
   if (code == QLatin1String("managed_installation_start_unconfirmed"))
     return QCoreApplication::translate("Workbench", "启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。");
   if (code == QLatin1String("managed_installation_integrity_failed"))

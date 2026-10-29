@@ -13,6 +13,7 @@ import zipfile
 
 
 HELPER = "Gaussian Scene Workbench Update Helper.exe"
+RECOVERY = "Gaussian Scene Workbench Recovery.exe"
 
 
 def sha(path: Path) -> str:
@@ -110,7 +111,7 @@ def merge_contract(args, archive: Path, manifest: Path, metadata: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("runtime-root", "repository", "trust-library", "cmake-cache", "build-executable",
-                 "toolchain-receipt", "cargo-home", "root", "evidence"):
+                 "recovery-build-executable", "toolchain-receipt", "cargo-home", "root", "evidence"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-tree", required=True)
@@ -121,6 +122,11 @@ def main() -> int:
         parser.error("fresh_owned_root_required")
     args.root.mkdir(parents=True)
     args.evidence.mkdir(parents=True, exist_ok=True)
+    recovery = args.runtime_root / "bin" / RECOVERY
+    assert recovery.is_file() and sha(recovery) == sha(args.recovery_build_executable), "official_recovery_build_identity_differs"
+    write_json(args.evidence / "official-recovery-input.json", {"schema": "gsw.engine_recovery_input/1",
+        "testOnly": False, "fixtureBuild": False, "recoverySha256": sha(recovery),
+        "buildExecutableSha256": sha(args.recovery_build_executable), "applicationStarted": False})
     output = args.root / "output"
     output.mkdir()
     archive, manifest = output / "native-update-engine-windows-x64.zip", output / "native-update-engine-component.json"
@@ -143,12 +149,15 @@ def main() -> int:
     assert record["sourceCommit"] == args.source_commit and record["sourceTree"] == args.source_tree
     assert record["configurationStatus"] == "NOT_CONFIGURED" and record["publicDistributionReady"] is False
     assert record["fixtureBuild"] is False and record["publisherAuthenticated"] is False
+    assert record["recoveryPath"] == "bin/" + RECOVERY and record["recoverySha256"] == sha(recovery)
     with zipfile.ZipFile(archive) as payload:
         names = payload.namelist()
         assert "bin/" + HELPER in names
+        assert "bin/" + RECOVERY in names
+        assert "bin/Qt6Widgets.dll" in names and "bin/Qt6Gui.dll" in names and "bin/platforms/qwindows.dll" in names
         assert "bin/Qt6Core.dll" in names and "bin/Qt6Network.dll" in names
         assert "bin/tls/qschannelbackend.dll" in names
-        assert all(name == "bin/" + HELPER for name in names if name.startswith("bin/") and name.casefold().endswith(".exe"))
+        assert all(name in {"bin/" + HELPER, "bin/" + RECOVERY} for name in names if name.startswith("bin/") and name.casefold().endswith(".exe"))
         assert any(name.startswith("native-update-engine-source/.github/") for name in names)
         assert any(name.startswith("native-update-engine-source/native/updater-trust/vendor-archives/") for name in names)
         assert {"msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll"} <= {
@@ -179,6 +188,20 @@ def main() -> int:
     assert outcome.returncode == 2 and events[-1]["code"] == "NOT_CONFIGURED", events
     assert not (check / ".update-trust-anchor").exists() and not (check / "updates/trust").exists()
     assert not (check / "current.json").exists() and not (check / "bin/Gaussian Scene Workbench.exe").exists()
+    recovery = check / "bin" / RECOVERY
+    assert sha(recovery) == record["recoverySha256"]
+    before_recovery = tree_hashes(check)
+    for index, arguments in enumerate((("--root", str(args.root / "unaccepted-root")),
+            ("--feed", "https://example.invalid/not-accepted/"), ("--key", "not-a-key"), ("--verified",))):
+        rejected = subprocess.run([str(recovery), *arguments], capture_output=True, timeout=30,
+            env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
+        write_json(args.evidence / ("official-recovery-reject-" + str(index) + ".json"), {
+            "exitCode": rejected.returncode, "arguments": list(arguments),
+            "stdout": rejected.stdout.decode("utf-8", "replace"), "stderr": rejected.stderr.decode("utf-8", "replace"),
+            "scope": "official-recovery-unsafe-cli-rejection-only", "guiRecoveryAcceptance": False})
+        assert rejected.returncode == 2, (arguments, rejected.returncode)
+        assert tree_hashes(check) == before_recovery
+    assert not (args.root / "unaccepted-root").exists()
     merge_contract(args, archive, manifest, record)
     write_json(args.evidence / "acceptance.json", {"schema": "gsw.native_update_engine_acceptance/1", "ok": True,
         "scope": "official-helper-default-disabled-component-only", "productionProfile": False,
@@ -186,9 +209,11 @@ def main() -> int:
         "publisherAuthenticated": False, "sourceCommit": args.source_commit, "sourceTree": args.source_tree,
         "mergeScope": "non-executable-owned-app-fixture-only", "originalApplicationArtifactPreserved": True,
         "contracts": ["official-default-helper", "NOT_CONFIGURED", "whole-component-zip", "exact-git-and-raw-crate-source",
+            "official-recovery-presence-and-identity", "recovery-unsafe-cli-rejected",
             "canonical-source-rebuild", "matching-runtime-shared", "conflicting-runtime-refused", "wrong-source-refused",
             "tampered-archive-refused", "fresh-output-only"],
-        "archiveSha256": sha(archive), "componentManifestSha256": sha(manifest), "helperSha256": sha(helper)})
+        "archiveSha256": sha(archive), "componentManifestSha256": sha(manifest), "helperSha256": sha(helper),
+        "recoverySha256": sha(recovery), "guiRecoveryAcceptance": False})
     print("Native update engine component contract PASS (default NOT_CONFIGURED only).")
     return 0
 

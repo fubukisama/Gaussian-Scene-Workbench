@@ -10,6 +10,10 @@ on:
       - 'native/src/NativeInstallation*'
       - 'native/src/NativeStartup*'
       - 'native/updater/**'
+      - 'native/recovery/**'
+      - 'native/src/NativeRecovery*'
+      - 'native/src/AppLanguage*'
+      - 'native/i18n/catalog.json'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
       - 'native/third_party/qt-process-quote/**'
@@ -82,6 +86,16 @@ jobs:
           Copy-Item -LiteralPath 'D:/ge/cpp/Release/Gaussian Scene Workbench Update Helper.exe' -Destination $helper
           windeployqt --release --no-translations --compiler-runtime $helper
           if($LASTEXITCODE -ne 0){throw 'Qt Network/TLS runtime staging failed.'}
+          cmake -S native/recovery -B D:/ge/recovery -G 'Visual Studio 17 2022' -A x64 `
+            -DGSW_UPDATER_FIXTURE_BUILD=OFF "-DPython3_EXECUTABLE=$((Get-Command python).Source)"
+          if($LASTEXITCODE -ne 0){throw 'Official Recovery configure failed.'}
+          cmake --build D:/ge/recovery --config Release --parallel --target gsw_native_recovery `
+            2>&1 | Tee-Object D:/ge/evidence/recovery-build.log
+          if($LASTEXITCODE -ne 0){throw 'Official Recovery build failed.'}
+          $recovery='D:/ge/runtime/bin/Gaussian Scene Workbench Recovery.exe'
+          Copy-Item -LiteralPath 'D:/ge/recovery/Release/Gaussian Scene Workbench Recovery.exe' -Destination $recovery
+          windeployqt --release --no-translations --compiler-runtime $recovery
+          if($LASTEXITCODE -ne 0){throw 'Qt Widgets Recovery runtime staging failed.'}
           ./scripts/stage_native_crt.ps1 -PackageRoot D:/ge/runtime | Out-File D:/ge/evidence/crt-staging.log -Encoding utf8
           Move-Item -LiteralPath D:/ge/runtime/native-crt-manifest.json -Destination D:/ge/runtime/native-update-engine-crt.json
           [ordered]@{schema='gsw.native_update_engine_build/1';sourceCommit=(git rev-parse HEAD).Trim();
@@ -114,6 +128,7 @@ jobs:
           python -I -B scripts/test_native_update_engine_component.py --runtime-root D:/ge/runtime `
             --repository "$PWD" --trust-library D:/gu/engine-production/release/gsw_updater_trust.lib `
             --cmake-cache D:/ge/cpp/CMakeCache.txt --build-executable 'D:/ge/cpp/Release/Gaussian Scene Workbench Update Helper.exe' `
+            --recovery-build-executable 'D:/ge/recovery/Release/Gaussian Scene Workbench Recovery.exe' `
             --toolchain-receipt D:/ge/engine-build.json --cargo-home D:/gu/engine-cargo `
             --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
             --root D:/ge/contract --evidence D:/ge/evidence 2>&1 | Tee-Object D:/ge/evidence/component-contract.log

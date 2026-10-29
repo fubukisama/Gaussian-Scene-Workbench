@@ -182,8 +182,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if path == "/service-unavailable-once" and visit == 1:
+        if path == "/service-unavailable-always" or path == "/service-unavailable-once" and visit == 1:
             self.send_response(503)
+            self.send_header("Retry-After", "86400")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -246,10 +247,11 @@ def main() -> None:
     parser.add_argument("--ready", type=Path, required=True)
     parser.add_argument("--content-root", type=Path)
     parser.add_argument("--control-file", type=Path)
+    parser.add_argument("--payload-mib", type=int, choices=(1, 64), default=1)
     args = parser.parse_args()
     args.root.mkdir(parents=True, exist_ok=True)
     ca, cert, key = certificates(args.root)
-    payload = bytes(range(256)) * 4096
+    payload = bytes(range(256)) * (4096 * args.payload_mib)
     payload_path = args.root / "payload.bin"
     payload_path.write_bytes(payload)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

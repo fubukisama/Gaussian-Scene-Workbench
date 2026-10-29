@@ -8,6 +8,9 @@ on:
       - 'native/updater/**'
       - 'native/updater-ui/**'
       - 'native/updater-developer/**'
+      - 'native/updater-space/**'
+      - 'native/recovery/**'
+      - 'native/bootstrap-fixture/**'
       - 'native/src/NativeDeveloperPublisher*'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
@@ -27,6 +30,7 @@ on:
       - 'native/CMakeLists.txt'
       - 'native/i18n/catalog.json'
       - 'native/tests/NativeUpdate*'
+      - 'native/tests/NativeBootstrap*'
       - 'packaging/updates/**'
       - 'scripts/*native_update*'
       - 'scripts/*native_release_gate*'
@@ -34,6 +38,7 @@ on:
       - 'scripts/test_native_developer_publisher.py'
       - 'scripts/test_native_activation_interruptions.py'
       - 'scripts/test_native_recovery_entry.py'
+      - 'scripts/test_native_bootstrap_fixture.py'
       - 'scripts/verify_native_update_source_bundle.py'
       - 'scripts/prepare_native_update_source.py'
       - '.github/workflows/native-auto-update.yml'
@@ -188,7 +193,14 @@ jobs:
   isolated-developer-core:
     runs-on: windows-2022
     timeout-minutes: 10
+    env:
+      PIP_CACHE_DIR: D:/gu/developer-pip
+      TEMP: D:/gu/developer-temp
+      TMP: D:/gu/developer-temp
     steps:
+      - name: Prepare owned developer temporary and cache directories
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path D:/gu/developer-temp,D:/gu/developer-pip -Force | Out-Null
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
@@ -221,8 +233,19 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
+          cmake -S native/updater-space -B native/build-update-space -G 'Visual Studio 17 2022' -A x64 `
+            -DGSW_REMOTE_SPACE_FIXTURE=ON
+          if($LASTEXITCODE -ne 0){throw 'Nonshipping resource fixture configure failed.'}
+          cmake --build native/build-update-space --config Release --target gsw_update_space_fixture
+          if($LASTEXITCODE -ne 0){throw 'Nonshipping resource fixture build failed.'}
+          $downloadFixture="$PWD/native/build-update-space/Release/GSW Update Space Fixture.exe"
+          windeployqt --release --no-translations --compiler-runtime $downloadFixture
+          if($LASTEXITCODE -ne 0){throw 'Resource fixture Qt/TLS runtime unavailable.'}
+          python -m pip install 'cryptography==50.0.2'
+          if($LASTEXITCODE -ne 0){throw 'Owned resource HTTPS fixture dependency unavailable.'}
           python -I -B scripts/test_native_update_space.py --remote-fixture-only `
             --publisher "$PWD/native/build-developer-publisher/Release/GSW Native Developer Publisher.exe" `
+            --download-fixture $downloadFixture `
             --work-root D:/gu/activation-space --evidence "$PWD/native/developer-evidence/space"
           if($LASTEXITCODE -ne 0){throw 'Native activation resource-failure contract failed.'}
       - uses: actions/upload-artifact@v7
@@ -525,6 +548,11 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'E2E native configure failed.'}
           cmake --build native/build-update-e2e --config Release --parallel --target gsw_update_application_fixture_a gsw_update_application_fixture_b gsw_update_fixture_launcher
           if($LASTEXITCODE -ne 0){throw 'E2E native windows/launcher build failed.'}
+          cmake -S native/recovery -B native/build-recovery-e2e -G 'Visual Studio 17 2022' -A x64 `
+            -DGSW_UPDATER_FIXTURE_BUILD=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-update-e2e/Scripts/python.exe"
+          if($LASTEXITCODE -ne 0){throw 'Independent recovery fixture configure failed.'}
+          cmake --build native/build-recovery-e2e --config Release --parallel --target gsw_native_recovery
+          if($LASTEXITCODE -ne 0){throw 'Independent recovery fixture build failed.'}
       - name: Issue private isolated A B and bad C
         shell: pwsh
         run: |
@@ -533,11 +561,23 @@ jobs:
             --fixture-a "$PWD/native/build-update-e2e/fixture-A/Release/Gaussian Scene Workbench.exe" `
             --fixture-b "$PWD/native/build-update-e2e/fixture-B/Release/Gaussian Scene Workbench.exe" `
             --launcher "$PWD/native/build-update-e2e/Release/Gaussian Scene Workbench Launcher.exe" `
+            --recovery "$PWD/native/build-recovery-e2e/Release/GSW Update Fixture Recovery.exe" `
             --windeployqt (Get-Command windeployqt).Source --source-commit (git rev-parse HEAD).Trim() `
             --source-tree (git rev-parse 'HEAD^{tree}').Trim() 2>&1 | Tee-Object native/update-e2e-evidence/prepare.log
           if($LASTEXITCODE -ne 0){throw 'E2E private issuer failed.'}
           $prepared=Get-Content native/.update-e2e/preparation.json -Raw | ConvertFrom-Json
           "GSW_UPDATER_FIXTURE_PROFILE_PATH=$($prepared.profile)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Rebuild each bundled Qt fixture corresponding source without starting it
+        shell: pwsh
+        run: |
+          foreach($label in @('A','B')){
+            cmake -S "native/.update-e2e/package-$label/source/native" -B "native/build-fixture-source-$label" `
+              -G 'Visual Studio 17 2022' -A x64
+            if($LASTEXITCODE -ne 0){throw "Bundled fixture $label source configure failed."}
+            cmake --build "native/build-fixture-source-$label" --config Release --parallel --target fixture `
+              2>&1 | Tee-Object "native/update-e2e-evidence/fixture-source-$label.log"
+            if($LASTEXITCODE -ne 0){throw "Bundled fixture $label corresponding source does not rebuild."}
+          }
       - name: Link distinct native test helper with the issued root
         id: e2e_helper
         shell: pwsh
@@ -605,4 +645,51 @@ jobs:
             native/recovery-entry-evidence/
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 14
+  isolated-first-bootstrap:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      TEMP: D:/gb/tmp
+      TMP: D:/gb/tmp
+    steps:
+      - name: Prepare owned bootstrap lab directories
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path D:/gb/tmp,D:/gb/evidence -Force | Out-Null
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build the distinct static-CRT bootstrap and restricted terminal lab
+        shell: pwsh
+        run: |
+          cmake -S native/bootstrap-fixture -B D:/gb/build -G 'Visual Studio 17 2022' -A x64 `
+            -DGSW_BOOTSTRAP_FIXTURE_ROOT=D:/gb/owned
+          if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab configure failed.'}
+          cmake --build D:/gb/build --config Release --parallel --target gsw_bootstrap_fixture gsw_bootstrap_terminal_harness
+          if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab build failed.'}
+      - name: Actual restricted medium-integrity terminal bootstrap contract
+        shell: pwsh
+        run: |
+          python -I -B scripts/test_native_bootstrap_fixture.py `
+            --bootstrap 'D:/gb/build/Release/GSW Bootstrap Fixture.exe' `
+            --harness 'D:/gb/build/Release/GSW Bootstrap Terminal Harness.exe' `
+            --root D:/gb/owned --evidence D:/gb/evidence 2>&1 | Tee-Object D:/gb/evidence/first-bootstrap.log
+          if($LASTEXITCODE -ne 0){throw 'Restricted terminal native bootstrap contract failed.'}
+      - name: Bind bootstrap lab evidence to source
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/bootstrap-evidence -Force | Out-Null
+          Copy-Item -LiteralPath D:/gb/evidence -Destination native/bootstrap-evidence/results -Recurse
+          [ordered]@{schema='gsw.bootstrap_isolated_evidence/1';testOnly=$true;production=$false;
+            publisherAuthenticated=$false;sourceCommit=(git rev-parse HEAD).Trim();sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
+            runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/bootstrap-evidence/source.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-bootstrap-evidence
+          path: native/bootstrap-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14

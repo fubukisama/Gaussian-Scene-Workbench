@@ -1,4 +1,9 @@
 {
+  "版本恢复": {"zh_CN":"版本恢复","en_US":"Version recovery","ja_JP":"バージョンの復元"},
+  "当前未选择任何恢复版本。关闭此窗口不会更改安装、工程或训练。": {"zh_CN":"当前未选择任何恢复版本。关闭此窗口不会更改安装、工程或训练。","en_US":"No recovery version is selected. Closing this window does not change the installation, projects, or training.","ja_JP":"復元するバージョンはまだ選択されていません。このウィンドウを閉じても、インストール、プロジェクト、学習は変更されません。"},
+  "安装位置：%1": {"zh_CN":"安装位置：%1","en_US":"Installation location: %1","ja_JP":"インストール先：%1"},
+  "关闭恢复窗口": {"zh_CN":"关闭恢复窗口","en_US":"Close recovery window","ja_JP":"復元ウィンドウを閉じる"},
+  "无法打开版本恢复界面。请保留当前安装并联系维护者；工程和设置未修改。": {"zh_CN":"无法打开版本恢复界面。请保留当前安装并联系维护者；工程和设置未修改。","en_US":"The version recovery window could not be opened. Keep the current installation and contact the maintainer. Projects and settings were not changed.","ja_JP":"バージョン復元ウィンドウを開けませんでした。現在のインストールを保持して保守担当者に連絡してください。プロジェクトと設定は変更していません。"},
   "启动状态未确认": {"zh_CN":"启动状态未确认","en_US":"Launch status unconfirmed","ja_JP":"起動状態は未確認です"},
   "启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。": {"zh_CN":"启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。","en_US":"The launch request was sent, but process creation was not confirmed. The application may still be starting. Check existing windows before trying again. Projects and settings were not changed.","ja_JP":"起動要求を送信しましたが、プロセス作成の確認は届いていません。プログラムは起動中の可能性があります。再試行する前に既存のウィンドウを確認してください。プロジェクトと設定は変更していません。"},
   "软件更新": {"zh_CN":"软件更新","en_US":"Software updates","ja_JP":"ソフトウェアの更新"},

@@ -1,0 +1,21 @@
+# Remote-only resource boundary product. Never installed or packaged.
+cmake_minimum_required(VERSION 3.24)
+project(GswUpdateSpaceFixture LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+option(GSW_REMOTE_SPACE_FIXTURE "Explicitly build the nonshipping remote resource fixture" OFF)
+if(NOT GSW_REMOTE_SPACE_FIXTURE)
+  message(FATAL_ERROR "This distinct fixture requires explicit remote-space opt-in")
+endif()
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network)
+qt_add_executable(gsw_update_space_fixture
+  ../tests/NativeUpdateSpaceFixture.cpp
+  ../src/NativeUpdateDownload.cpp ../src/NativeUpdateDownload.h)
+target_include_directories(gsw_update_space_fixture PRIVATE ../src)
+target_compile_definitions(gsw_update_space_fixture PRIVATE GSW_REMOTE_SPACE_FIXTURE=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(gsw_update_space_fixture PRIVATE Qt6::Core Qt6::Network)
+set_target_properties(gsw_update_space_fixture PROPERTIES OUTPUT_NAME "GSW Update Space Fixture")
+if(MSVC)
+  target_compile_options(gsw_update_space_fixture PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+endif()

@@ -34,6 +34,32 @@ def atomic_json(path, value):
     os.replace(temporary, path)
 
 
+def read_owned_json_shared(path):
+    # The worker atomically replaces its queue. The test reader must permit
+    # FILE_SHARE_DELETE rather than accidentally breaking that real write.
+    # No retry or exception swallowing: genuine access errors remain failures.
+    import msvcrt
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong,
+        ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x1 | 0x2 | 0x4,
+        None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    with os.fdopen(descriptor, "rb") as stream:
+        raw = stream.read(8193)
+    if len(raw) > 8192:
+        raise ValueError("owned_fixture_json_oversized")
+    return json.loads(raw)
+
+
 def owned_worker(queue_path, stop_path):
     require_remote()
     state = json.loads(queue_path.read_text(encoding="utf-8"))
@@ -63,7 +89,7 @@ class LiveUpdate(unittest.TestCase):
         value = {}
         while time.monotonic() < deadline:
             if path.exists():
-                value = json.loads(path.read_text(encoding="utf-8"))
+                value = read_owned_json_shared(path)
                 if predicate(value):
                     return value
             time.sleep(.025)

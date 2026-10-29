@@ -369,6 +369,60 @@ private slots:
     QVERIFY(read(logPath).mid(previousLogSize).trimmed().isEmpty()); // TLS must fail before HTTP bytes.
     QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".part")));
   }
+  void retryBackoffRemainsBoundedAndCancellable_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::newRow("attempt-exhaustion") << QStringLiteral("exhaustion");
+    QTest::newRow("original-total-deadline") << QStringLiteral("deadline");
+    QTest::newRow("cancel-during-backoff") << QStringLiteral("cancel");
+  }
+  void retryBackoffRemainsBoundedAndCancellable() {
+    QFETCH(QString, mode);
+    auto r = request(QStringLiteral("/service-unavailable-always"), QStringLiteral("bounded-") + mode + QStringLiteral(".bin"));
+    const QByteArray original("original release is not a retry scratch file");
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write(original), qint64(original.size())); previous.close();
+    const auto currentPath = r.destinationPath + QStringLiteral(".current.json");
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write(original), qint64(original.size())); current.close();
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto p = policy(); p.maximumAttempts = 2;
+    p.retryDelayMs = mode == QLatin1String("deadline") ? 1500 : mode == QLatin1String("cancel") ? 150 : 10;
+    if (mode == QLatin1String("deadline")) p.totalTimeoutMs = 700;
+    NativeUpdateDownload client;
+    QSignalSpy done(&client, &NativeUpdateDownload::finished);
+    bool observedBackoff = false;
+    QObject::connect(&client, &NativeUpdateDownload::stateChanged, &client,
+        [&](NativeUpdateDownload::State state) {
+      if (state != NativeUpdateDownload::State::RetryWait) return;
+      observedBackoff = true;
+      QCOMPARE(read(r.destinationPath), original); QCOMPARE(read(currentPath), original);
+      if (mode == QLatin1String("cancel")) client.cancel();
+    });
+    QElapsedTimer clock; clock.start();
+    QVERIFY(client.start(r, p)); QVERIFY(done.wait(8000));
+    const auto result = qvariant_cast<NativeUpdateDownloadResult>(done.first().first());
+    QVERIFY(!result.ok); QVERIFY(observedBackoff);
+    const auto expected = mode == QLatin1String("cancel") ? QStringLiteral("download_cancelled") :
+        mode == QLatin1String("deadline") ? QStringLiteral("download_total_timeout") : QStringLiteral("download_http_error");
+    QCOMPARE(result.code, expected);
+    QCOMPARE(result.cancelled, mode == QLatin1String("cancel"));
+    QVERIFY(clock.elapsed() < 5000); // Never adopts the untrusted day-long Retry-After.
+    QTest::qWait(p.retryDelayMs + 100); // Old queued retry must not issue after terminal state.
+    QCOMPARE(done.size(), qsizetype(1));
+    QCOMPARE(read(r.destinationPath), original); QCOMPARE(read(currentPath), original);
+    qsizetype requests = 0;
+    for (const auto &line : read(logPath).mid(previousLogSize).split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (row.isEmpty()) continue;
+      QCOMPARE(row.value("path").toString(), QStringLiteral("/service-unavailable-always"));
+      QVERIFY(row.value("range").toString().isEmpty());
+      ++requests;
+    }
+    QCOMPARE(requests, qsizetype(mode == QLatin1String("exhaustion") ? 2 : 1));
+    QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".part")));
+    QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".resume.json")));
+  }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)
 #include "NativeUpdateDownloadTests.moc"
