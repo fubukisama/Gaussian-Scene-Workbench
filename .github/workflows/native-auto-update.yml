@@ -632,6 +632,14 @@ jobs:
             --windeployqt (Get-Command windeployqt).Source --evidence "$PWD/native/recovery-chooser-evidence" `
             2>&1 | Tee-Object native/update-e2e-evidence/recovery-chooser.log
           if($LASTEXITCODE -ne 0){throw 'Independent trusted recovery chooser contract failed.'}
+      - name: Explicit signed rollback preserves state through pointer permission and sharing failures
+        if: ${{ !cancelled() && steps.e2e_helper.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/test_native_update_rollback_resources.py --remote-fixture-only `
+            --preparation native/.update-e2e/preparation.json --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe `
+            --evidence "$PWD/native/rollback-resource-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/rollback-resource.log
+          if($LASTEXITCODE -ne 0){throw 'Signed rollback pointer-resource contract failed.'}
       - name: Record isolated identity and stop only the test server
         if: always()
         shell: pwsh
@@ -665,6 +673,7 @@ jobs:
             native/update-live-evidence/
             native/recovery-entry-evidence/
             native/recovery-chooser-evidence/
+            native/rollback-resource-evidence/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

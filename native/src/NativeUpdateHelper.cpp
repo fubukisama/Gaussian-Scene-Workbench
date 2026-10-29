@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QTextStream>
 #include <QTimer>
@@ -41,6 +42,23 @@ void saveHealth(const QString &root, const QJsonObject &status) noexcept {
     gsw::activation::ensureDirectory(QFileInfo(path).absolutePath());
     gsw::activation::durableWrite(path, QJsonDocument(status).toJson(QJsonDocument::Compact), true);
   } catch (...) {}
+}
+void saveObservedHealthIfCurrent(const QString &root, const QJsonObject &status) noexcept {
+  // Availability is optional. A later process can start while an older
+  // observer is still waiting. Never let that older completion overwrite the
+  // newer launch's record, and never wait on an ongoing update just to write
+  // this advisory evidence. This lock admits no package or rollback.
+  try {
+    gsw::NativeInstallationLock lock(root, gsw::NativeInstallationLock::OpenMode::RequireExisting);
+    if (!lock.locked()) return;
+    const auto current = gsw::activation::parse(gsw::activation::read(healthRecordPath(root), 8192), 8192);
+    const auto observed = gsw::activation::parse(QJsonDocument(status).toJson(QJsonDocument::Compact), 8192);
+    if (current.at("schema") != "gsw.native_startup_status/1" ||
+        observed.at("schema") != "gsw.native_startup_status/1") return;
+    for (const auto *key : {"attemptId", "buildId", "executableSha256", "pid", "processCreationTime"})
+      if (current.at("attempt").at(key) != observed.at("attempt").at(key)) return;
+    saveHealth(root, status);
+  } catch (...) {} // Corrupt, unwritable or contended evidence stays neutral.
 }
 int startupStatus(const QString &root) {
   QJsonObject fields;
@@ -80,6 +98,37 @@ int startupStatus(const QString &root) {
     code = storedCode; fields.insert(QStringLiteral("attempt"), attempt);
   } catch (...) {} // Missing/malformed evidence is neutral; never rewrite it.
   event(QStringLiteral("startup_status"), code, fields);
+  return 0;
+}
+
+int recoveryCandidates(const QString &root, const QString &channel, const gsw::NativeInstallationLock &lock) {
+  auto history = gsw::NativeUpdateTrustBridge::request(QStringLiteral("inspect_accepted"), root, channel, {}, lock);
+  if (!history.ok) return failure(history.code);
+  const auto accepted = history.acceptedState.value(QStringLiteral("accepted")).toObject();
+  if (accepted.size() > 1024) return failure(QStringLiteral("RECOVERY_CATALOG_LIMIT"));
+  QSet<QString> revoked;
+  for (const auto &item : history.acceptedState.value(QStringLiteral("revokedBuildIds")).toArray()) revoked.insert(item.toString());
+  QJsonArray candidates;
+  for (const auto &id : accepted.keys()) {
+    if (revoked.contains(id)) continue;
+    // Directory/receipt presence is never admission. Mint independent history
+    // and verify the online receipt, immutable descriptor and COMPLETE slot.
+    auto admission = gsw::NativeUpdateTrustBridge::rollbackAdmission(root, channel, id, lock);
+    if (!admission.ok) continue;
+    const auto verified = gsw::NativeActivationCore::verifyInstalled(root, *admission.update, lock);
+    if (!verified.ok || verified.buildId != id) continue;
+    // A public catalog never transports archive URLs or arbitrary signed text.
+    // A non-version display label falls back to the safe immutable build ID;
+    // the original admitted offer/descriptor is not changed.
+    const auto display = admission.offer.value(QStringLiteral("displayVersion")).toString(id);
+    static const QRegularExpression uriLike(QStringLiteral("(?:[A-Za-z][A-Za-z0-9+.-]*:|//|\\\\\\\\)"));
+    bool safeDisplay = !display.isEmpty() && display.toUcs4().size() <= 128 && !uriLike.match(display).hasMatch();
+    for (const auto character : display)
+      if (character.category() == QChar::Other_Control) safeDisplay = false;
+    candidates.append(QJsonObject{{"buildId", id},
+      {"displayVersion", safeDisplay ? display : id}});
+  }
+  event(QStringLiteral("recovery_candidates"), QStringLiteral("ACCEPTED_HISTORY"), {{"candidates", candidates}});
   return 0;
 }
 
@@ -164,7 +213,7 @@ int installedLaunch(const QString &operation, const QString &root,
   // Exactly one canonical stdout result. Optional bounded observation must not
   // retract successful process creation, kill it, repoint current or restart it.
   try {
-    saveHealth(root, attempt->observe());
+    saveObservedHealthIfCurrent(root, attempt->observe());
   } catch (...) {}
   return 0;
 }
@@ -179,12 +228,14 @@ int main(int argc, char **argv) {
   const bool launchOperation = operation == QLatin1String("--verify-installed") ||
       operation == QLatin1String("--launch-current");
   const bool healthOperation = operation == QLatin1String("--startup-status");
+  const bool listOperation = operation == QLatin1String("--list-recovery");
   if ((launchOperation || healthOperation) && !args.isEmpty()) return failure(QStringLiteral("INVALID_REQUEST"));
   const QString channel = args.isEmpty() ? QStringLiteral("stable") : args.takeFirst();
   const QString expected = args.isEmpty() ? QString() : args.takeFirst();
   if (!QStringList{QStringLiteral("--check"), QStringLiteral("--prepare"),
       QStringLiteral("--install"), QStringLiteral("--apply-prepared"), QStringLiteral("--rollback"),
-      QStringLiteral("--verify-installed"), QStringLiteral("--launch-current"), QStringLiteral("--startup-status")}.contains(operation) ||
+      QStringLiteral("--verify-installed"), QStringLiteral("--launch-current"), QStringLiteral("--startup-status"),
+      QStringLiteral("--list-recovery")}.contains(operation) ||
       !QStringList{QStringLiteral("stable"), QStringLiteral("preview")}.contains(channel) ||
       (!expected.isEmpty() && operation != QLatin1String("--apply-prepared") && operation != QLatin1String("--rollback")) ||
       (operation == QLatin1String("--rollback") && expected.isEmpty())) return failure(QStringLiteral("INVALID_REQUEST"));
@@ -216,8 +267,17 @@ int main(int argc, char **argv) {
     catch (const gsw::activation::Failure &error) { return failure(error.code); }
     catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
   }
-  gsw::NativeInstallationLock lock(root.absolutePath());
+  gsw::NativeInstallationLock lock(root.absolutePath(), listOperation
+      ? gsw::NativeInstallationLock::OpenMode::RequireExisting
+      : gsw::NativeInstallationLock::OpenMode::CreateIfMissing);
   if (!lock.locked()) return failure(lock.error());
+  if (listOperation) {
+    // Pure read-only catalog, including a corrupt/missing current pointer.
+    // Return before the stdin cancellation reader or any network/state path.
+    try { return recoveryCandidates(root.absolutePath(), channel, lock); }
+    catch (const gsw::activation::Failure &error) { return failure(error.code); }
+    catch (...) { return failure(QStringLiteral("INVALID_REQUEST")); }
+  }
   auto cancellation = std::make_shared<std::atomic_bool>(false);
   // The sole detached input reader owns only its shared atomic. It never uses
   // QObjects or library state during process shutdown. EOF is not cancellation.
