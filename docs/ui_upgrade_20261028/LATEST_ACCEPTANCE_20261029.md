@@ -2,6 +2,32 @@
 
 Status: **VERIFIED_7F76_PACKAGE_AND_A105_CLOUD / NEW_UI_REGRESSIONS_RUNNING / PERFORMANCE_REANALYSED_INCONCLUSIVE / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
+## 0B. 三处公开界面 RED 已取得，修复候选正在复验
+
+`83ab92b8e5cea54925738f878f1305d1b8372fa0` / run40821180712 最终FAIL，
+不是capture缺失：16类证据齐全、integrity VALID，明确失败的是初始化A11y、暂停作业显示、
+COLMAP提示三项真实边界。初始化字段真实Role=EditableText、Tab两次可达、publicState不变，
+但Name为空；作业报告同一ID已paused/ended，combo/tooltip仍Running/Unverified；
+12种表单组合的COLMAP hint仍写死E。未将这些红灯改为PASS。
+
+唯一下载artifact12875004113（163916022 bytes）SHA256
+`346fcbbef58f92dd0f504bbd9ee03ead7797d327e7b85f646fa015ad848315be`，
+位于`D:/Codex/validation/gsw-ui-upgrade-20261028/forms-red-run40821180712/`。
+Root实际查看新的英文COLMAP surface-0016与observer-ended surface-0039原图，
+后者SHA `e0db6d25d80de2f13db311fb44d7d3147fff769be6687ca161ace5b8faee0e4c`。
+
+候选 **`c3e667a249e0de1b4384aa3d97d29172e08a474b`**、tree
+`59d195a88b50ee9e2685c81998f5a74f302dd0a6` 已实现最小显示修复：
+重用已有三语中性COLMAP key；编辑字段标签建立buddy关系，让读屏名称随现有绑定更新；
+连接中的同一作业caption采用已接受的当前报告状态，不重扫worker、不改作业文件或控制条件。
+本机仅静态三语验证（2276 UI messages/2376 entries）和v18编译链接exit0，未运行应用或测试。
+
+- [Forms 40823927939](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40823927939)：上述原34项GREEN复验，并额外独立3个菜单键盘/A11y测试；旧测试deadline不变，额外测试不是已经通过的声称。
+- [Native Windows 40823880544](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40823880544)：该精确候选的完整CI，尚未完成。经owner释放，仅在main/grid加入严格opt-in、固定phase、最多64行的flushed留证；不动健康hook、NativeViewport、原15s/10s、渲染或抓帧数量。只观察正常完整CI的一次原命令，不额外重播旧binary。
+
+Forms的临时目录、pip缓存及独立QA依赖环境改用该远端自有非系统盘；hosted预装Python仅作为只读bootstrap。
+三语、浅深/宽窄、菜单与新grid阶段仍须实际结果，不把“代码已修/编译通过”写成GREEN、根因已修或完整接受。
+
 ## 0A. 2026-10-29 后续实际验收增量
 
 - `a105f53ee98e4bb5e8a24db807a2cf49f1ad711e` / [40811998263](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40811998263) 三个 job 最终 SUCCESS。直接 Qt 日志确认4 bootstrap、175 CTests（2275.73s）、安装适配器及真实产品回读通过：3033文件、1351后端记录、1572源码记录、28隐藏文件，EXE `a8eaa664b1ef5dec850ea16f6facfc5d3ccd06c9c9547c04b27b982951da06e6`。只读取日志，没有重复下载非最新的大产品包，也没有声称本机已静态核对该包。更新的 updater 源码仍需自己的接受。
