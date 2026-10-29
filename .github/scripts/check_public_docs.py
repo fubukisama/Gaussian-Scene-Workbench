@@ -21,6 +21,11 @@ PRIMARY = (
     "docs/LICENSING.md", "docs/images/README.md",
 )
 LANGUAGE_PAGES = {"README.md": "en", "README.zh-CN.md": "zh-CN", "README.ja.md": "ja"}
+OVERVIEW_BADGE_TARGETS = {
+    "README.md": ("download-the-preview", "before-you-start"),
+    "README.zh-CN.md": ("下载预览版", "使用前确认"),
+    "README.ja.md": ("プレビュー版の入手", "利用前の確認"),
+}
 MULTILINGUAL = {"README_RELEASE.md", "docs/README.md", "docs/LICENSING.md", "native/README.md", "docs/images/README.md", "docs/TRAINING_PERFORMANCE.md"}
 
 
@@ -32,9 +37,15 @@ class Html(HTMLParser):
         self.details = 0
         self.divs = 0
         self.languages = set()
+        self.anchor_stack = []
+        self.linked_images = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag == "a":
+            self.anchor_stack.append(attrs.get("href", ""))
+        if tag == "img":
+            self.linked_images.append((attrs.get("src", ""), self.anchor_stack[-1] if self.anchor_stack else ""))
         if attrs.get("lang"):
             self.languages.add(attrs["lang"])
         if tag == "div":
@@ -50,6 +61,8 @@ class Html(HTMLParser):
                 self.links.append(attrs[key])
 
     def handle_endtag(self, tag):
+        if tag == "a" and self.anchor_stack:
+            self.anchor_stack.pop()
         if tag == "div":
             self.divs -= 1
             if self.divs < 0:
@@ -135,6 +148,16 @@ def check_document(relative, tracked=None):
         errors.append("unclosed language/container div")
     if relative in LANGUAGE_PAGES and not re.match(r'\s*<div lang="'+re.escape(LANGUAGE_PAGES[relative])+r'">', text):
         errors.append("localized overview has no matching document-language container")
+    if relative in OVERVIEW_BADGE_TARGETS:
+        release_guide = (ROOT / "README_RELEASE.md").read_text(encoding="utf-8-sig")
+        for badge, fragment in zip(("native_preview", "platform"), OVERVIEW_BADGE_TARGETS[relative]):
+            matches = [(src, href) for src, href in parser.linked_images if urlsplit(src).path.startswith("/badge/" + badge + "-") and urlsplit(src).netloc == "img.shields.io"]
+            expected = "README_RELEASE.md#" + fragment
+            if len(matches) != 1 or matches[0][1] != expected:
+                errors.append(f"{badge} badge must link to its localized guide section: {expected}")
+            headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", release_guide, re.M)
+            if fragment not in {heading.lower().replace(" ", "-") for heading in headings}:
+                errors.append(f"{badge} badge target section does not exist: {expected}")
     if relative in MULTILINGUAL and not {"en", "zh-CN", "ja"}.issubset(parser.languages):
         errors.append("multilingual entry lacks explicit English/Chinese/Japanese language markers")
     if re.search(r'<font\b|style\s*=[^>]*font-family', clean, re.I):
@@ -205,6 +228,7 @@ def main():
     findings.extend({"path": "LICENSE", "message": error} for error in plain_license_errors((ROOT / "LICENSE").read_text(encoding="utf-8")))
     report = {"checkedMarkdownFiles": len(paths), "checkedLinkReferences": references,
               "plainTextLicenseChecked": True, "publishedTargetInventoryChecked":True, "standardGplTextReformatted": False,
+              "linkedOverviewBadgesChecked": True,
               "findings": findings, "passed": not findings}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

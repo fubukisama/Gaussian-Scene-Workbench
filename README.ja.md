@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="ネイティブプレビュー 0.3.8">
-  <img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64">
+  <a href="README_RELEASE.md#プレビュー版の入手" title="ネイティブプレビューを入手"><img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="ネイティブプレビュー 0.3.8"></a>
+  <a href="README_RELEASE.md#利用前の確認" title="Windows 対応環境と実行環境の要件"><img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64"></a>
   <a href="native/LICENSE.md"><img src="https://img.shields.io/badge/desktop_license-GPL--3.0--or--later-16a34a?style=flat-square" alt="独自ネイティブ主プログラム：GPL-3.0-or-later"></a>
 </p>
 

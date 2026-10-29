@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="原生预览版 0.3.8">
-  <img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64">
+  <a href="README_RELEASE.md#下载预览版" title="获取原生预览版"><img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="原生预览版 0.3.8"></a>
+  <a href="README_RELEASE.md#使用前确认" title="Windows 平台与运行环境要求"><img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64"></a>
   <a href="native/LICENSE.md"><img src="https://img.shields.io/badge/desktop_license-GPL--3.0--or--later-16a34a?style=flat-square" alt="原创原生主程序：GPL-3.0-or-later"></a>
 </p>
 
