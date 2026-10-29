@@ -29,6 +29,7 @@ MAX_DEPTH = 32
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 MAX_CRATE_UNPACKED = 512 * 1024**2
 MAX_DEPENDENCY_UNPACKED = 2 * 1024**3
+VENDOR_PROJECTION = "cargo-vendor-1.99.1"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 BUILD_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
@@ -475,6 +476,24 @@ def _crate_members(payload, path: str, package: str, budget) -> dict:
     return members
 
 
+def _cargo_filtered_metadata(relative: str) -> str | None:
+    """Exact vendor_this projection from the pinned Cargo 1.99.1 source.
+
+    Apply only after every original TAR entry has passed _crate_members.
+    The original lock-bound .crate is retained, including these metadata bytes.
+    """
+    parts = relative.split("/")
+    if ".git" in parts:
+        return "git-directory"
+    if parts[-1] == ".gitignore":
+        return "gitignore"
+    if parts[-1] == ".gitattributes":
+        return "gitattributes"
+    if relative == ".cargo-ok":
+        return "cargo-marker"
+    return None
+
+
 def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> dict:
     """Git lock -> original crate digest -> every vendor byte, not self-reporting.
 
@@ -528,7 +547,9 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
     if not locked:
         if generated:
             _fail("update_source_dependency_evidence_unavailable")
-        return {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0}
+        return {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0,
+            "originalRegistryFileCount": 0, "vendoredRegistryFileCount": 0,
+            "filteredRegistryMetadataFileCount": 0}
     config_name = root + ".cargo/config.toml"
     if config_name not in generated or generated[config_name]["kind"] != "cargo-vendor":
         _fail("update_source_dependency_evidence_unavailable")
@@ -564,6 +585,7 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
             vendor_roots[checksum["package"]] = directory, checksum
     if set(vendor_roots) != set(locked):
         _fail("update_source_dependency_evidence_unavailable")
+    original_count, vendored_count, filtered_count = 0, 0, 0
     for digest, (name, version) in locked.items():
         package = name + "-" + version
         archive_name = root + "vendor-archives/" + package + ".crate"
@@ -575,21 +597,22 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
         if directory not in (name, package):
             _fail("update_source_dependency_files_differ")
         members = _crate_members(payload, archive_name, package, budget)
+        # Cargo's exact metadata-only projection is not a source omission: all
+        # original files above remain in the lock-digest-bound raw .crate.
+        projected = {path: row for path, row in members.items() if _cargo_filtered_metadata(path) is None}
+        original_count += len(members)
+        vendored_count += len(projected)
+        filtered_count += len(members) - len(projected)
         prefix = root + "vendor/" + directory + "/"
-        if checksum["files"] != {path: row["sha256"] for path, row in members.items()}:
-            declared, expected_files = checksum["files"], {path: row["sha256"] for path, row in members.items()}
+        if checksum["files"] != {path: row["sha256"] for path, row in projected.items()}:
+            declared, expected_files = checksum["files"], {path: row["sha256"] for path, row in projected.items()}
             missing, extra = set(expected_files) - set(declared), set(declared) - set(expected_files)
             known, categories = set(), set()
             for relative in missing:
-                parts = relative.split("/")
-                if ".git" in parts:
-                    known.add(relative); categories.add("git-directory")
-                elif parts[-1] == ".gitignore":
-                    known.add(relative); categories.add("gitignore")
-                elif parts[-1] == ".gitattributes":
-                    known.add(relative); categories.add("gitattributes")
-                elif relative == ".cargo-ok":
-                    known.add(relative); categories.add("cargo-marker")
+                category = _cargo_filtered_metadata(relative)
+                if category is not None:
+                    known.add(relative)
+                    categories.add(category)
             error = ArchiveError("update_source_dependency_files_differ")
             if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,192}", directory):
                 error.sourceComponent = directory
@@ -598,7 +621,7 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
                 "knownCargoFilteredCount": len(known), "otherMissingCount": len(missing - known),
                 "metadataCategories": sorted(categories)}
             raise error
-        for path, row in members.items():
+        for path, row in projected.items():
             actual = generated.get(prefix + path)
             if (actual is None or actual["kind"] != "cargo-vendor" or actual["size"] != row["size"]
                     or actual["sha256"] != row["sha256"]):
@@ -610,7 +633,9 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
         checked.update({archive_name, prefix + ".cargo-checksum.json"})
     if checked != set(generated):
         _fail("update_source_dependency_files_differ")
-    return {"generated": checked, "registryPackageCount": len(locked), "dependencyArchiveCount": len(locked)}
+    return {"generated": checked, "registryPackageCount": len(locked), "dependencyArchiveCount": len(locked),
+        "originalRegistryFileCount": original_count, "vendoredRegistryFileCount": vendored_count,
+        "filteredRegistryMetadataFileCount": filtered_count}
 
 
 def _verify_git_source(metadata: dict, captured: dict, hashes: dict, expected_tree, payload) -> dict:
@@ -658,7 +683,9 @@ def _verify_git_source(metadata: dict, captured: dict, hashes: dict, expected_tr
         recorded.add(name)
     if recorded != set(expected):
         _fail("update_source_tree_file_set_differs")
-    dependency = {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0}
+    dependency = {"generated": set(), "registryPackageCount": 0, "dependencyArchiveCount": 0,
+        "originalRegistryFileCount": 0, "vendoredRegistryFileCount": 0,
+        "filteredRegistryMetadataFileCount": 0}
     if provenance["generatedDependencies"] or "native/updater-trust/Cargo.lock" in recorded:
         dependency = _verify_dependencies(payload, hashes, recorded, provenance["generatedDependencies"])
     actual_source = {name[7:] for name in hashes if name.startswith("source/")}
@@ -668,6 +695,10 @@ def _verify_git_source(metadata: dict, captured: dict, hashes: dict, expected_tr
         "sourceCommit": metadata["sourceCommit"], "sourceTree": metadata["sourceTree"],
         "trackedFileCount": len(recorded), "generatedFileCount": len(dependency["generated"]),
         "registryPackageCount": dependency["registryPackageCount"], "dependencyArchiveCount": dependency["dependencyArchiveCount"],
+        "vendorProjectionId": VENDOR_PROJECTION,
+        "originalRegistryFileCount": dependency["originalRegistryFileCount"],
+        "vendoredRegistryFileCount": dependency["vendoredRegistryFileCount"],
+        "filteredRegistryMetadataFileCount": dependency["filteredRegistryMetadataFileCount"],
         "sourceManifestSha256": hashes["source-manifest.json"]["sha256"],
         "sourceProvenanceSha256": hashes["source-provenance.json"]["sha256"]}
 

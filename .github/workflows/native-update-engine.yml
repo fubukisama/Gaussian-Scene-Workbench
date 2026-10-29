@@ -1,0 +1,136 @@
+name: Native Update Engine Component
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/src/NativeActivation*'
+      - 'native/src/NativeUpdate*'
+      - 'native/src/NativeInstallation*'
+      - 'native/src/NativeStartup*'
+      - 'native/updater/**'
+      - 'native/updater-trust/**'
+      - 'native/third_party/tough/**'
+      - 'native/third_party/qt-process-quote/**'
+      - 'scripts/prepare_native_update_engine_component.py'
+      - 'scripts/test_native_update_engine_component.py'
+      - 'scripts/prepare_native_update_source.py'
+      - 'scripts/package_native_update.py'
+      - 'scripts/stage_native_crt.ps1'
+      - '.github/workflows/native-update-engine.yml'
+
+# This only produces a default-disabled research-preview engine component.
+# No profile/key, public installation, feed, Release or promotion is configured.
+permissions:
+  contents: read
+
+jobs:
+  engine-component:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 50
+    env:
+      CARGO_HOME: D:/gu/engine-cargo
+      RUSTUP_HOME: D:/gu/engine-rust
+      CARGO_TARGET_DIR: D:/gu/engine-production
+      RUSTUP_TOOLCHAIN: '1.99.1'
+      PIP_CACHE_DIR: D:/gu/engine-pip
+      TEMP: D:/ge/tmp
+      TMP: D:/ge/tmp
+    steps:
+      - name: Prepare owned D-drive build and temporary directories
+        shell: pwsh
+        run: New-Item -ItemType Directory -Path D:/ge/tmp,D:/ge/evidence,D:/ge/runtime/bin -Force | Out-Null
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: D:/ge/qt
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/engine-cargo
+            D:/gu/engine-rust
+          key: engine-default-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Build only the unconfigured production static library and official helper
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path D:/ge/tmp,D:/ge/evidence,D:/ge/runtime/bin -Force | Out-Null
+          foreach($name in @('GSW_UPDATER_FIXTURE_PROFILE_PATH','GSW_UPDATER_PRODUCTION_PROFILE_PATH')){
+            [Environment]::SetEnvironmentVariable($name,$null,'Process')
+          }
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'Pinned engine Rust toolchain unavailable.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release --lib `
+            --no-default-features --target-dir D:/gu/engine-production 2>&1 | Tee-Object D:/ge/evidence/rust-build.log
+          if($LASTEXITCODE -ne 0){throw 'Default unconfigured engine library failed.'}
+          $library='D:/gu/engine-production/release/gsw_updater_trust.lib'
+          cmake -S native/updater -B D:/ge/cpp -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=OFF `
+            -DGSW_UPDATER_FIXTURE_BUILD=OFF "-DGSW_TRUST_LIBRARY=$library"
+          if($LASTEXITCODE -ne 0){throw 'Official engine helper configure failed.'}
+          cmake --build D:/ge/cpp --config Release --parallel --target gsw_native_update_helper 2>&1 | Tee-Object D:/ge/evidence/cpp-build.log
+          if($LASTEXITCODE -ne 0){throw 'Official engine helper build failed.'}
+          $helper='D:/ge/runtime/bin/Gaussian Scene Workbench Update Helper.exe'
+          Copy-Item -LiteralPath 'D:/ge/cpp/Release/Gaussian Scene Workbench Update Helper.exe' -Destination $helper
+          windeployqt --release --no-translations --compiler-runtime $helper
+          if($LASTEXITCODE -ne 0){throw 'Qt Network/TLS runtime staging failed.'}
+          ./scripts/stage_native_crt.ps1 -PackageRoot D:/ge/runtime | Out-File D:/ge/evidence/crt-staging.log -Encoding utf8
+          Move-Item -LiteralPath D:/ge/runtime/native-crt-manifest.json -Destination D:/ge/runtime/native-update-engine-crt.json
+          [ordered]@{schema='gsw.native_update_engine_build/1';sourceCommit=(git rev-parse HEAD).Trim();
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();rustFeatures=@();noDefaultFeatures=$true;
+            fixtureProfileInputPresent=$false;productionProfileInputPresent=$false;fixtureBuild=$false;
+            trustLibrary=$library;trustLibrarySha256=(Get-FileHash $library -Algorithm SHA256).Hash.ToLowerInvariant();
+            helperSha256=(Get-FileHash $helper -Algorithm SHA256).Hash.ToLowerInvariant();
+            rustc=((& rustup run 1.99.1 rustc --version --verbose) -join "`n");
+            cargo=((& rustup run 1.99.1 cargo --version) -join "`n");cmake=((& cmake --version) -join "`n");
+            qt=((& windeployqt --version) -join "`n");runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;
+            configurationStatus='NOT_CONFIGURED';publicDistributionReady=$false;publisherAuthenticated=$false
+          } | ConvertTo-Json -Depth 8 | Set-Content D:/ge/engine-build.json -Encoding utf8NoBOM
+      - name: Observe the actual official helper default without an application
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path D:/ge/precheck -Force | Out-Null
+          Copy-Item -LiteralPath D:/ge/runtime/bin -Destination D:/ge/precheck/bin -Recurse
+          $result=& 'D:/ge/precheck/bin/Gaussian Scene Workbench Update Helper.exe' --check
+          $exit=$LASTEXITCODE
+          $result | Set-Content D:/ge/evidence/default-helper-check.jsonl -Encoding utf8NoBOM
+          $last=($result | Select-Object -Last 1)|ConvertFrom-Json
+          if($exit -ne 2 -or $last.code -cne 'NOT_CONFIGURED'){throw 'The official default engine is not NOT_CONFIGURED.'}
+          if((Test-Path D:/ge/precheck/.update-trust-anchor) -or (Test-Path D:/ge/precheck/updates/trust) -or
+              (Test-Path 'D:/ge/precheck/bin/Gaussian Scene Workbench.exe')){throw 'Default check created trust/application state.'}
+          # Exit 2 is the asserted helper rejection, not a failed workflow step.
+          $global:LASTEXITCODE=0
+      - name: Complete component ZIP and extracted-helper public contract
+        shell: pwsh
+        run: |
+          python -I -B scripts/test_native_update_engine_component.py --runtime-root D:/ge/runtime `
+            --repository "$PWD" --trust-library D:/gu/engine-production/release/gsw_updater_trust.lib `
+            --cmake-cache D:/ge/cpp/CMakeCache.txt --build-executable 'D:/ge/cpp/Release/Gaussian Scene Workbench Update Helper.exe' `
+            --toolchain-receipt D:/ge/engine-build.json --cargo-home D:/gu/engine-cargo `
+            --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
+            --root D:/ge/contract --evidence D:/ge/evidence 2>&1 | Tee-Object D:/ge/evidence/component-contract.log
+          if($LASTEXITCODE -ne 0){throw 'Official default engine component contract failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-update-engine-component-evidence
+          path: D:/ge/evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: native-update-engine-windows-x64
+          path: D:/ge/contract/output/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

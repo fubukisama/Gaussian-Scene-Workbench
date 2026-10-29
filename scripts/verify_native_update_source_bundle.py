@@ -115,7 +115,11 @@ def verify(args):
     proof = PACKAGE.verify_release_archive(archive, report, expected)
     if (proof.get("registryPackageCount") != registry_count or proof.get("dependencyArchiveCount") != registry_count
             or preparation.get("dependencyArchiveCount") != registry_count
-            or proof.get("trackedFileCount") != len(expected)):
+            or proof.get("trackedFileCount") != len(expected)
+            or proof.get("vendorProjectionId") != "cargo-vendor-1.99.1"
+            or any(type(proof.get(key)) is not int or proof[key] < 0 for key in (
+                "originalRegistryFileCount", "vendoredRegistryFileCount", "filteredRegistryMetadataFileCount"))
+            or proof["originalRegistryFileCount"] != proof["vendoredRegistryFileCount"] + proof["filteredRegistryMetadataFileCount"]):
         raise ValueError("source_bundle_dependency_closure_incomplete")
     with executable.open("rb") as source:
         if source.read() != b"GSW SOURCE-ONLY FIXTURE: NOT A PE EXECUTABLE; NEVER LAUNCH\n":

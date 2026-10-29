@@ -40,11 +40,12 @@ endforeach()
 
 add_library(gsw_update_ui_shared STATIC "${native_root}/src/AppLanguage.cpp"
   "${native_root}/src/AppLanguage.h" "${native_root}/src/NativeInstallation.cpp"
-  "${native_root}/src/NativeInstallation.h")
+  "${native_root}/src/NativeInstallation.h" "${native_root}/src/NativeStartupHealth.cpp"
+  "${native_root}/src/NativeStartupHealth.h")
 target_include_directories(gsw_update_ui_shared PUBLIC "${native_root}/src")
 target_link_libraries(gsw_update_ui_shared PUBLIC Qt6::Core Qt6::Widgets)
 if(WIN32)
-  target_link_libraries(gsw_update_ui_shared PRIVATE Shell32 Ole32 Propsys User32 Uuid)
+  target_link_libraries(gsw_update_ui_shared PRIVATE Shell32 Ole32 Propsys User32 Uuid bcrypt advapi32)
 endif()
 # Both variants are compiled. Only the fixture library may honor the explicit
 # fixture-application locator; the production library has no such definition.

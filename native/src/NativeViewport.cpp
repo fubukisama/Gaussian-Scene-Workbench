@@ -2921,6 +2921,11 @@ bool NativeViewport::infiniteGridRenderingAvailable() const {
   return mGridShaderReady;
 }
 
+bool NativeViewport::startupBaseRenderingAvailable() const {
+  return mPointProgram && mPointProgram->isLinked() && mGridShaderReady &&
+         mGridProgram && mGridProgram->isLinked();
+}
+
 bool NativeViewport::camerasAvailable() const {
   return !mScene->mCameraTrajectory.cameras().isEmpty();
 }

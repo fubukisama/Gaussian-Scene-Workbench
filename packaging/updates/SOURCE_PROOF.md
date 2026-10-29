@@ -27,10 +27,11 @@ The independent chain is:
 1. The accepted exact Git tree binds the actual archived `Cargo.lock` bytes.
 2. Each crates.io registry package in that lockfile requires exactly one original
    `NAME-VERSION.crate`; the actual archive SHA-256 must equal the lock checksum.
-3. A bounded, streaming standard-library tar reader compares every regular file
-   inside that gzip archive with the actual vendored file bytes. The sole new
-   vendor metadata file is `.cargo-checksum.json`, which is separately checked
-   against the lock and the independently verified file set.
+3. A bounded, streaming standard-library tar reader validates and hashes every
+   regular file inside that original gzip archive. It then compares Cargo's
+   pinned metadata-only vendor projection with the actual vendored file bytes.
+   The sole new vendor metadata file is `.cargo-checksum.json`, which is
+   separately checked against the lock and the independently verified file set.
 4. Registry package, raw archive and vendored crate sets are exact matches,
    including packages for platforms not selected by the current Windows build.
 
@@ -45,6 +46,24 @@ Cargo 1.99.1 emits an advisory `$comment` alongside `package` and `files` in
 vendor checksum metadata. Only this optional bounded text field is accepted;
 it is never an authority input. All other unknown fields still fail closed.
 See the [exact Cargo source used by Rust 1.99.1](https://github.com/rust-lang/cargo/blob/5f94df4789f005f9a352888e8355ffc645b7ed0e/src/ops/cargo_vendor.rs#L315).
+
+The `cargo-vendor-1.99.1` projection follows only the exact
+[`vendor_this` predicate](https://github.com/rust-lang/cargo/blob/5f94df4789f005f9a352888e8355ffc645b7ed0e/src/ops/cargo_vendor.rs#L604):
+it omits paths with a component exactly `.git`, files whose basename is exactly
+`.gitignore` or `.gitattributes`, and the root-relative `.cargo-ok` marker.
+Matching is case-sensitive; other hidden files, nested `.cargo-ok`, source code
+and licenses are never implicitly omitted. All original TAR entries first pass
+the same safety checks, including entries omitted from the vendor projection.
+Their complete original bytes remain in the SHA-256 lock-bound `.crate` in the
+source bundle; source preparation does not restore Git metadata into vendor
+directories. Extra vendor copies, unexplained missing files and changed bytes
+remain failures even if local checksum metadata is changed coherently.
+
+The source evidence separates `originalRegistryFileCount`,
+`vendoredRegistryFileCount` and `filteredRegistryMetadataFileCount`, records
+`vendorProjectionId`, and requires original count = vendor count + filtered
+count. The counts describe two representations of the same retained original
+source, not permission to discard files from the original registry archives.
 
 The reader must never extract tar paths into the filesystem. Only regular files
 and directories are permitted under the exact `NAME-VERSION/` prefix. Links,

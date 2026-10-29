@@ -19,6 +19,11 @@ SPEC.loader.exec_module(ARCHIVE)
 
 SCRIPT = Path(__file__).with_name("package_native_update.py")
 PRODUCT = "Fubukisama.GaussianSceneWorkbench.Native"
+OWNED_CRATE_FILES = {
+    "Cargo.toml": b'[package]\nname="owned-fixture"\nversion="1.0.0"\nlicense="MIT"\n',
+    "src/lib.rs": b"// owned test source; never compiled or executed\n",
+    "LICENSE": b"owned test license bytes\n",
+    ".cargo_vcs_info.json": b'{"git":{"sha1":"0000000000000000000000000000000000000000"}}'}
 
 
 class NativeUpdateArchiveTests(unittest.TestCase):
@@ -105,10 +110,7 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
                   ".github/workflows/check.yml": b"name: isolated source fixture\n"}
         generated_data = {}
         if crate_proof:
-            crate_files = {"Cargo.toml": b'[package]\nname="owned-fixture"\nversion="1.0.0"\nlicense="MIT"\n',
-                "src/lib.rs": b"// owned test source; never compiled or executed\n",
-                "LICENSE": b"owned test license bytes\n",
-                ".cargo_vcs_info.json": b'{"git":{"sha1":"0000000000000000000000000000000000000000"}}'}
+            crate_files = dict(OWNED_CRATE_FILES)
             if crate_extra_files:
                 crate_files.update(crate_extra_files)
             buffer = io.BytesIO()
@@ -185,6 +187,10 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.assertEqual(result["sourceTree"], "b" * 40)
         self.assertEqual(result["trackedFileCount"], len(expected))
         self.assertEqual(result["generatedFileCount"], 0)
+        self.assertEqual(result["vendorProjectionId"], "cargo-vendor-1.99.1")
+        self.assertEqual(result["originalRegistryFileCount"], 0)
+        self.assertEqual(result["vendoredRegistryFileCount"], 0)
+        self.assertEqual(result["filteredRegistryMetadataFileCount"], 0)
         self.assertEqual(archive.read_bytes(), before)
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["candidate-1.zip", "payload-1"])
 
@@ -219,6 +225,9 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.assertEqual(result["registryPackageCount"], 1)
         self.assertEqual(result["dependencyArchiveCount"], 1)
         self.assertEqual(result["generatedFileCount"], 7)
+        self.assertEqual(result["originalRegistryFileCount"], 4)
+        self.assertEqual(result["vendoredRegistryFileCount"], 4)
+        self.assertEqual(result["filteredRegistryMetadataFileCount"], 0)
         self.assertEqual(archive.read_bytes(), before)
         self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["candidate-1.zip", "payload-1"])
 
@@ -386,6 +395,83 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as original:
                 self.assertIn("owned-fixture-1.0.0/.gitignore", original.getnames())
                 self.assertIn("owned-fixture-1.0.0/.gitattributes", original.getnames())
+
+    def test_exact_cargo_projection_applies_component_rules_not_hidden_file_globs(self):
+        filtered = {name: b"owned original metadata\n" for name in (
+            ".git/config", "nested/.git/config", ".gitignore", "nested/.gitignore",
+            ".gitattributes", "nested/.gitattributes", ".cargo-ok")}
+        retained = {name: b"owned retained metadata\n" for name in (
+            ".gitmodules", "nested/.cargo-ok", ".config")}
+        def projection(files):
+            prefix = "native/updater-trust/vendor/owned-fixture/"
+            checksum = json.loads(files[prefix + ".cargo-checksum.json"][0])
+            for name in filtered:
+                files.pop(prefix + name)
+                checksum["files"].pop(name)
+            files[prefix + ".cargo-checksum.json"] = json.dumps(checksum).encode(), "cargo-vendor"
+        archive, report, expected = self.candidate(crate_proof=True,
+            crate_extra_files={**filtered, **retained}, mutate_generated=projection)
+        before = archive.read_bytes()
+        proof = ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(proof["originalRegistryFileCount"], 4 + len(filtered) + len(retained))
+        self.assertEqual(proof["vendoredRegistryFileCount"], 4 + len(retained))
+        self.assertEqual(proof["filteredRegistryMetadataFileCount"], len(filtered))
+        self.assertEqual(archive.read_bytes(), before)
+        with zipfile.ZipFile(archive) as bundle:
+            for name, data in retained.items():
+                self.assertEqual(bundle.read("source/native/updater-trust/vendor/owned-fixture/" + name), data)
+            raw = bundle.read("source/native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate")
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as original:
+                for name, data in {**filtered, **retained}.items():
+                    self.assertEqual(original.extractfile("owned-fixture-1.0.0/" + name).read(), data)
+
+    def test_coherent_omission_of_source_license_and_unrecognized_hidden_metadata_is_rejected(self):
+        for omitted in ("src/lib.rs", "LICENSE", ".cargo_vcs_info.json", ".config",
+                ".GITIGNORE", ".gitignore.bak", "nested/.cargo-ok", "nested/.gitkeep"):
+            def omission(files):
+                prefix = "native/updater-trust/vendor/owned-fixture/"
+                files.pop(prefix + omitted)
+                checksum = json.loads(files[prefix + ".cargo-checksum.json"][0])
+                checksum["files"].pop(omitted)
+                files[prefix + ".cargo-checksum.json"] = json.dumps(checksum).encode(), "cargo-vendor"
+            with self.subTest(omitted=omitted):
+                extra = {} if omitted in ("src/lib.rs", "LICENSE", ".cargo_vcs_info.json") else {omitted: b"must remain\n"}
+                archive, report, expected = self.candidate(crate_proof=True,
+                    crate_extra_files=extra, mutate_generated=omission)
+                with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+                self.assertEqual(caught.exception.code, "update_source_dependency_files_differ")
+
+    def test_filtered_metadata_cannot_reenter_vendor_through_self_reported_checksum(self):
+        archive, report, expected = self.candidate(crate_proof=True,
+            crate_extra_files={".gitignore": b"must remain only in original archive\n"})
+        with self.assertRaises(ARCHIVE.ArchiveError) as caught:
+            ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(caught.exception.code, "update_source_dependency_files_differ")
+
+    def test_original_tar_safety_is_enforced_even_for_filtered_git_metadata(self):
+        for kind in ("symlink", "hardlink", "alias"):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT) as crate:
+                # Keep a complete valid package. An incorrect early filter must
+                # not pass this test merely because Cargo.toml was absent.
+                for name, data in sorted(OWNED_CRATE_FILES.items()):
+                    item = tarfile.TarInfo("owned-fixture-1.0.0/" + name)
+                    item.size = len(data)
+                    crate.addfile(item, io.BytesIO(data))
+                names = ["owned-fixture-1.0.0/.git/config"]
+                if kind == "alias":
+                    names.append("owned-fixture-1.0.0/.git/CONFIG")
+                for name in names:
+                    item = tarfile.TarInfo(name)
+                    if kind in ("symlink", "hardlink"):
+                        item.type = tarfile.SYMTYPE if kind == "symlink" else tarfile.LNKTYPE
+                        item.linkname = "../../outside-sentinel"
+                    crate.addfile(item, io.BytesIO(b""))
+            with self.subTest(kind=kind):
+                archive, report, expected = self.candidate(crate_proof=True, raw_crate_override=buffer.getvalue())
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
 
     def test_missing_raw_crate_or_license_never_becomes_complete_source(self):
         for name, code in (

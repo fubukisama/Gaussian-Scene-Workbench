@@ -13,6 +13,7 @@ on:
       - 'native/third_party/tough/**'
       - 'native/third_party/miniz/**'
       - 'native/third_party/nlohmann/**'
+      - 'native/third_party/qt-process-quote/**'
       - 'native/src/NativeUpdate*'
       - 'native/src/NativeActivation*'
       - 'native/src/NativeStartup*'
@@ -103,6 +104,14 @@ jobs:
             --default-probe D:/gu/profile-default/release/gsw-trust-profile-probe.exe `
             --configured-probe D:/gu/profile-configured/release/gsw-trust-profile-probe.exe 2>&1 | Tee-Object native/profile-evidence/contracts.log
           if($LASTEXITCODE -ne 0){throw 'Compiled-profile public boundary failed.'}
+      - name: Reject unsafe developer configuration inputs in isolated probe targets
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-profile/Scripts/python.exe" -I -B native/updater-trust/tests/remote_profile_rejections.py `
+            --cargo rustup --toolchain 1.99.1 --manifest "$PWD/native/updater-trust/Cargo.toml" `
+            --profile $env:GSW_UPDATER_PRODUCTION_PROFILE_PATH --target-dir D:/gu/profile-configured `
+            --work-root D:/gu/profile-rejection-evidence
+          if($LASTEXITCODE -ne 0){throw 'Unsafe compiled-profile input was accepted.'}
       - name: Record probe-only scope and stop the owned setup server
         if: always()
         shell: pwsh
@@ -124,7 +133,10 @@ jobs:
         if: always()
         with:
           name: native-auto-update-profile-evidence
-          path: native/profile-evidence/
+          path: |
+            native/profile-evidence/
+            D:/gu/profile-rejection-evidence/*.json
+            D:/gu/profile-rejection-evidence/*.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

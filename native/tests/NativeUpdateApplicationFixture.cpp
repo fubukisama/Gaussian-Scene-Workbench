@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+#include "NativeStartupHealth.h"
 
 #ifndef GSW_UPDATE_FIXTURE_LABEL
 #error A distinct A/B fixture label is required.
@@ -77,7 +78,10 @@ int main(int argc, char **argv) {
     record.insert(QString::fromLatin1("healthScope"), QString::fromLatin1("qt-fixture-window-surface"));
     record.insert(QString::fromLatin1("phase"), QString::fromLatin1("shown"));
     if (!shown || !surface->painted() || !marker(path, record)) app.exit(4);
-    else QTimer::singleShot(150, &app, &QCoreApplication::quit);
+    else {
+      gsw::reportNativeStartupReady(quintptr(window.winId()), "qt-fixture-window-surface");
+      QTimer::singleShot(150, &app, &QCoreApplication::quit);
+    }
   });
   const int result = app.exec();
   record.insert(QString::fromLatin1("phase"), QString::fromLatin1("normal_exit"));

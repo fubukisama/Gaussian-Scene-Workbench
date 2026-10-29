@@ -44,6 +44,24 @@ class CompiledProfileContract(unittest.TestCase):
         self.assertEqual(response["product"], "Fubukisama.GaussianSceneWorkbench.Native")
         self.assertEqual(response["platform"], "windows-x64")
 
+    def test_compiled_profile_does_not_adopt_runtime_environment(self):
+        expected = self.probe(self.configured_probe)
+        self.assertEqual(expected["code"], "CONFIGURED")
+        environment = os.environ.copy()
+        for name in ("GSW_UPDATER_PRODUCTION_PROFILE_PATH", "GSW_UPDATER_FIXTURE_PROFILE_PATH",
+                     "GSW_UPDATE_ROOT", "GSW_UPDATE_FEED", "GSW_UPDATE_CA", "GSW_UPDATE_TIME"):
+            environment[name] = "runtime-replacement-must-not-be-read"
+        self.assertEqual(self.probe(self.configured_probe, environment=environment), expected)
+
+    def test_probe_has_no_runtime_profile_argument(self):
+        for path in (self.default_probe, self.configured_probe):
+            with self.subTest(probe=str(path)):
+                result = subprocess.run([str(path), "--profile", "runtime-replacement.json"],
+                                        capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 64)
+                self.assertEqual(json.loads(result.stdout),
+                                 {"schema": "gsw.profile_probe/1", "ok": False, "code": "INVALID_ARGUMENTS"})
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

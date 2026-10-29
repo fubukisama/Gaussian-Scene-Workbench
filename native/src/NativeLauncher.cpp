@@ -66,7 +66,9 @@ int main(int argc, char **argv) {
   if (plan.valid()) {
     if (gsw::startNativeInstallation(plan, diagnostics, &plan.error)) return 0;
   }
-  const QString title = QCoreApplication::translate("Workbench", "无法启动软件");
+  const QString title = plan.error == QLatin1String("managed_installation_start_unconfirmed")
+      ? QCoreApplication::translate("Workbench", "启动状态未确认")
+      : QCoreApplication::translate("Workbench", "无法启动软件");
   const QString text = gsw::nativeInstallationErrorText(plan.error);
 #ifdef Q_OS_WIN
   MessageBoxW(nullptr, reinterpret_cast<LPCWSTR>(text.utf16()),

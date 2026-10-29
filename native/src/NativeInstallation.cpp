@@ -1,4 +1,5 @@
 #include "NativeInstallation.h"
+#include "NativeStartupHealth.h"
 #include "NativeUpdateLocalPath.h"
 #include "../third_party/nlohmann/json.hpp"
 
@@ -183,42 +184,22 @@ bool managedLaunch(const NativeLaunchPlan &plan, bool diagnostics, bool create, 
       {"diagnostics", create && diagnostics}};
   const auto input = QJsonDocument(intent).toJson(QJsonDocument::Compact);
   if (input.size() > 64 * 1024) return fail("managed_installation_integrity_failed");
-  QProcess helper;
-  helper.setProgram(helperPath);
-  helper.setArguments({create ? QStringLiteral("--launch-current") : QStringLiteral("--verify-installed")});
-  helper.setWorkingDirectory(QFileInfo(helperPath).absolutePath());
-  helper.setProcessEnvironment(plan.environment);
-#ifdef Q_OS_WIN
-  helper.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *parameters) {
-    parameters->flags |= CREATE_NO_WINDOW;
-  });
-#endif
-  helper.start();
-  if (!helper.waitForStarted(5000)) return fail("managed_installation_integrity_failed");
-  if (helper.write(input) != input.size()) { helper.kill(); helper.waitForFinished(5000); return fail("managed_installation_integrity_failed"); }
-  helper.closeWriteChannel();
-  QByteArray output, errors;
-  QElapsedTimer deadline; deadline.start();
-  while (helper.state() != QProcess::NotRunning && deadline.elapsed() < 120000) {
-    helper.waitForReadyRead(100);
-    output += helper.readAllStandardOutput(); errors += helper.readAllStandardError();
-    if (output.size() > 16384 || errors.size() > 16384) break;
-  }
-  if (helper.state() != QProcess::NotRunning) {
-    helper.kill(); helper.waitForFinished(5000); return fail("managed_installation_integrity_failed");
-  }
-  output += helper.readAllStandardOutput(); errors += helper.readAllStandardError();
-  if (helper.exitStatus() != QProcess::NormalExit || helper.exitCode() != 0 ||
-      output.size() > 16384 || errors.size() > 16384) return fail("managed_installation_integrity_failed");
+  QByteArray output;
+  bool creationUnconfirmed = false;
+  if (!nativeStartupHelperExchange(helperPath, plan, input, create, &output, &creationUnconfirmed))
+    return fail(creationUnconfirmed ? "managed_installation_start_unconfirmed" : "managed_installation_integrity_failed");
+  const auto invalidResponse = [&] {
+    return fail(create ? "managed_installation_start_unconfirmed" : "managed_installation_integrity_failed");
+  };
   QJsonParseError parse;
   const auto document = QJsonDocument::fromJson(output, &parse);
-  if (parse.error != QJsonParseError::NoError || !document.isObject()) return fail("managed_installation_integrity_failed");
+  if (parse.error != QJsonParseError::NoError || !document.isObject()) return invalidResponse();
   // The fixed helper emits exactly one canonical record. Equality rejects
   // duplicate keys, additional records and noncanonical transport ambiguity.
   const auto recordBytes = output.endsWith("\r\n") ? output.chopped(2)
       : output.endsWith('\n') ? output.chopped(1) : QByteArray();
   if (recordBytes.isEmpty() || QJsonDocument(document.object()).toJson(QJsonDocument::Compact) != recordBytes)
-    return fail("managed_installation_integrity_failed");
+    return invalidResponse();
   const auto record = document.object();
   const QSet<QString> required{"schema", "phase", "code", "buildId", "executableSha256"};
   const auto names = record.keys();
@@ -227,7 +208,7 @@ bool managedLaunch(const NativeLaunchPlan &plan, bool diagnostics, bool create, 
       record.value("phase") != (create ? QLatin1String("launched") : QLatin1String("launch_verified")) ||
       record.value("code") != (create ? QLatin1String("PROCESS_CREATED") : QLatin1String("VERIFIED")) ||
       record.value("buildId") != plan.version || record.value("executableSha256") != plan.executableSha256)
-    return fail("managed_installation_integrity_failed");
+    return invalidResponse();
   return true;
 }
 } // namespace
@@ -293,6 +274,8 @@ NativeLaunchPlan resolveNativeInstallation(const QString &root, const bool diagn
 }
 
 QString nativeInstallationErrorText(const QString &code) {
+  if (code == QLatin1String("managed_installation_start_unconfirmed"))
+    return QCoreApplication::translate("Workbench", "启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。");
   if (code == QLatin1String("managed_installation_integrity_failed"))
     return QCoreApplication::translate("Workbench", "程序文件校验失败，已阻止启动。请重新安装已验证版本。");
   if (code == QLatin1String("managed_installation_start_failed"))

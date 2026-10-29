@@ -1,4 +1,6 @@
 {
+  "启动状态未确认": {"zh_CN":"启动状态未确认","en_US":"Launch status unconfirmed","ja_JP":"起動状態は未確認です"},
+  "启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。": {"zh_CN":"启动请求已发送，但未收到进程创建确认。程序可能仍在启动，请先检查已有窗口，不要重复启动。工程和设置未修改。","en_US":"The launch request was sent, but process creation was not confirmed. The application may still be starting. Check existing windows before trying again. Projects and settings were not changed.","ja_JP":"起動要求を送信しましたが、プロセス作成の確認は届いていません。プログラムは起動中の可能性があります。再試行する前に既存のウィンドウを確認してください。プロジェクトと設定は変更していません。"},
   "软件更新": {"zh_CN":"软件更新","en_US":"Software updates","ja_JP":"ソフトウェアの更新"},
   "软件更新…": {"zh_CN":"软件更新…","en_US":"Software updates…","ja_JP":"ソフトウェアの更新…"},
   "正在运行的构建：%1": {"zh_CN":"正在运行的构建：%1","en_US":"Running build: %1","ja_JP":"実行中のビルド：%1"},
