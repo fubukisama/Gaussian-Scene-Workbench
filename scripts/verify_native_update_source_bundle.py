@@ -159,6 +159,9 @@ def main():
             "scope": "source-only", "production": False, "applicationAcceptance": False,
             "payloadExecuted": False, "code": getattr(error, "code", "source_bundle_acceptance_failed"),
             "errorType": type(error).__name__, "failureSite": sites}
+        component = getattr(error, "sourceComponent", None)
+        if isinstance(component, str) and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,192}", component):
+            result["crateDirectory"] = component
         print(json.dumps(result, ensure_ascii=True))
         if OWNED_EVIDENCE == args.evidence.absolute():
             try:

@@ -41,6 +41,11 @@ staging tree. Cache directory names and local checksum declarations grant no
 trust. No private key, public Release, production environment, user project or
 running application is involved.
 
+Cargo 1.99.1 emits an advisory `$comment` alongside `package` and `files` in
+vendor checksum metadata. Only this optional bounded text field is accepted;
+it is never an authority input. All other unknown fields still fail closed.
+See the [exact Cargo source used by Rust 1.99.1](https://github.com/rust-lang/cargo/blob/5f94df4789f005f9a352888e8355ffc645b7ed0e/src/ops/cargo_vendor.rs#L315).
+
 The reader must never extract tar paths into the filesystem. Only regular files
 and directories are permitted under the exact `NAME-VERSION/` prefix. Links,
 devices, sparse files, traversal, Windows aliases, duplicate files and unknown
