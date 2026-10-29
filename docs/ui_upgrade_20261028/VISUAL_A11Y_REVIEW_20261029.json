@@ -1,0 +1,1501 @@
+{
+  "schema": "gsw.ui_visual_a11y_review/1",
+  "reviewDate": "2026-10-29",
+  "status": "BOUNDED_REVIEW_COMPLETE_ACCESSIBILITY_REMOTE_NOT_RUN",
+  "fullAcceptance": false,
+  "imageEvidence": {
+    "runId": 40800828340,
+    "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+    "sourceTree": "74c8a6f5ee0bc941716b905bd61a19edb8e29995",
+    "artifactRoot": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340",
+    "artifactZipSha256": "b06e6a601e9aff6cd008caac8f6933ae050e927d15d447b68fcfe8c88357676f",
+    "qaExecutableSha256": "40f3c4aaf5d9d7641be9e5ababa4da43e7cee7198c4e3dfb66066205de44cd6e",
+    "surfaceResultsSha256": "36958147f7df747598d2b942c6ffb5619590652c45578a1e7f30919d3fa36d72",
+    "currentSourceAtStaticReview": "e48d535683d5d5269e422971e53c7ea104f9fd4e",
+    "currentTreeAtStaticReview": "45efb05ed0d802b2fac0c16a492ca47b6da98225",
+    "evidenceIsCurrentHead": false,
+    "minimumMatrixCells": 192,
+    "capturedProfiles": 300,
+    "actuallyViewedThisPass": 40,
+    "classesViewed": 16,
+    "pngHashesRecomputedAndMatched": 40,
+    "counts": {
+      "PASS_REPRESENTATIVE": 35,
+      "OBSERVED_TEXT_ISSUE": 2,
+      "OBSERVED_STATE_TEXT_INCONSISTENCY": 2,
+      "FOLLOW_UP_NOT_CONFIRMED": 1
+    },
+    "scope": "Actual unmodified raw PNGs viewed individually. Sixteen Chinese dark narrow and sixteen English light regular, plus eight Japanese light regular high-risk forms. Width is the recorded class-specific minimum, not a universal pixel width.",
+    "noAllSurfacePassClaim": true
+  },
+  "observations": [
+    {
+      "id": "VIS-TEXT-01",
+      "status": "OBSERVED",
+      "kind": "drive-specific-instruction",
+      "reviewIndices": [
+        3,
+        4
+      ],
+      "detail": "COLMAP executable placeholder specifies drive E despite supported D-drive and C-only location policy.",
+      "sourceAtStaticReview": "native/src/ReconstructionDialog.cpp:81",
+      "proposedMinimumNextStep": "Add a real dialog placeholder regression in three locales, then use drive-neutral executable selection wording. Root owns production/catalog changes.",
+      "productionFixed": false
+    },
+    {
+      "id": "VIS-STATE-01",
+      "status": "OBSERVED_REQUIRES_TRANSITION_REGRESSION",
+      "kind": "selected-job-status-disagreement",
+      "reviewIndices": [
+        26,
+        38
+      ],
+      "detail": "Existing-job combo shows Running/Liveness Unverified while the selected job report and monitor show Paused/Session Ended.",
+      "sourceAtStaticReview": "native/src/ExistingTrainingDialog.cpp:272-279",
+      "hypothesis": "The combo is refreshed from m->jobs while selected-job presentation is refreshed from m->report. A real transition regression is needed before treating this as the confirmed cause.",
+      "proposedMinimumNextStep": "Use owned observer process/job fixture to transition to paused/ended and assert selected combo and current observed report do not contradict each other; preserve jobId, raw state and provenance.",
+      "productionFixed": false
+    },
+    {
+      "id": "VIS-REACH-01",
+      "status": "NOT_CONFIRMED",
+      "kind": "narrow-toolbar-action",
+      "reviewIndices": [
+        11
+      ],
+      "detail": "Export Retained Logs is not directly visible in the minimum-width TaskDetailsDialog image. Native toolbar overflow was not operated; image alone cannot establish that the action is unreachable.",
+      "sourceAtStaticReview": "native/src/TaskDetailsDialog.cpp:93-116",
+      "proposedMinimumNextStep": "Real-window keyboard/overflow reachability check if this surface is next selected.",
+      "productionFixed": false
+    }
+  ],
+  "accessibility": {
+    "status": "QA_HELPER_READY_REMOTE_NOT_RUN",
+    "scope": "One actual enabled editable field in existing InitializationDialog, not another form gallery and not all controls.",
+    "helper": "native/tests/UiAccessibilityAssertions.h",
+    "function": "gsw::tests::checkAccessibleEditableField(QWidget&, QWidget&, QLineEdit&, const QString&, const std::function<QJsonObject()>&)",
+    "ownedWindow": "existing InitializationDialog fixture",
+    "startControl": "initializationKind",
+    "targetControl": "initializationCount",
+    "independentExpectedNames": {
+      "zh_CN": "初始化点数",
+      "en_US": "Initialization Point Count",
+      "ja_JP": "初期化点数"
+    },
+    "observableContract": [
+      "QAccessible interface valid",
+      "QAccessible Name matches independent translated field caption",
+      "role EditableText and enabled/focusable/visible/non-read-only state",
+      "actual bounded Tab path from source selector reaches point-count field inside owned window",
+      "Qt semantic hasFocus preserves focus-proxy behavior",
+      "public request/report/running snapshot unchanged",
+      "restore original owned focus without activating any other window"
+    ],
+    "safeguards": [
+      "Remote GitHub Actions Windows only; requires existing visible active owned window",
+      "No changes to names, focus policies, enabled/read-only state, business values, worker or model state",
+      "No private focusNextPrevChild calls or hand-written mock focus chain",
+      "No anonymous Qt internal child scan; objectName is only an unchanged diagnostic identifier",
+      "No local application/test/GUI execution"
+    ],
+    "staticSuspicion": "InitializationEditor builds QLabel+field rows without explicit buddy/accessibleName. This is not proof of runtime missing names; Qt may infer some labels.",
+    "observedRuntimeMissingNames": null,
+    "actualRedObserved": false,
+    "actualGreenObserved": false,
+    "rootIntegration": "Wire helper from existing InitializationDialogUiTests visualForms optional validator. Supply actual controls and existing public-state snapshot. Emit evidence and fail remote test on actual failure. Do not change production until source-qualified runtime RED.",
+    "disabledReasonsStatus": "NOT_RUN: actual disabled controls are visible in raw PNGs, but assistive descriptions/reasons are not proved by pixels or source strings.",
+    "menuShortcutsStatus": "NOT_RUN for all-surface accessibility; existing F11/Escape tests remain separate.",
+    "syntaxCompile": {
+      "status": "PASS",
+      "executionKind": "MSVC /Zs syntax-only; no executable produced or run",
+      "compiler": "MSVC 14.34.31933",
+      "qtHeaders": "6.8.3",
+      "exitCode": 0,
+      "command": "call D:\\Apps\\PortableMSVC-2022\\msvc\\setup_x64.bat && cl.exe /nologo /Zs /TP /std:c++20 /Zc:__cplusplus /EHsc /utf-8 /W4 /permissive- /DQT_WIDGETS_LIB /DQT_GUI_LIB /DQT_CORE_LIB /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6 /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtCore /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtGui /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtWidgets /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\lib\\qt6\\mkspecs\\win32-msvc D:\\CodexProjects\\Ishida_Lab\\Documents\\git\\native\\tests\\UiAccessibilityAssertions.h",
+      "output": "UiAccessibilityAssertions.h\r\n"
+    },
+    "references": [
+      "https://doc.qt.io/qt-6.8/qaccessible.html#queryAccessibleInterface",
+      "https://doc.qt.io/qt-6.8/qaccessibleinterface.html#text",
+      "https://doc.qt.io/qt-6.8/qwidget.html#setFocus",
+      "https://doc.qt.io/qt-6.8/qwidget.html#setFocusProxy"
+    ]
+  },
+  "existingTrainingStateTracer": {
+    "status": "QA_HELPER_READY_REMOTE_RED_NOT_STARTED",
+    "staticSourceCommit": "ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8",
+    "staticTree": "9e9657d6e574b7b9733f69ef0de9da505f57dd83",
+    "sourceFiles": [
+      {
+        "path": "native/src/ExistingTrainingDialog.cpp",
+        "sha256": "804b75123c4fb847f4333d602b162a2f12bb877d06baa09e135229bc123510f3"
+      },
+      {
+        "path": "native/tests/RuntimeDecouplingUiTests.cpp",
+        "sha256": "94a35dcaf4a584e2c7631d92d19006e0151d6bf89ec4d7107d53ad5debd94c59"
+      },
+      {
+        "path": "native/worker/training_job_connection.py",
+        "sha256": "a1ed5b483c79434db41ceada7a86211cc8ac189adf8806b40eafacbd070c6380"
+      }
+    ],
+    "helper": "native/tests/ExistingTrainingStateAssertions.h",
+    "helperSha256": "6b1e394495a8ce2a471685992e1e18efd65bc6fc1257407e156ca4b3193d9bfd",
+    "publicSeam": [
+      "ExistingTrainingDialog::refreshJobs/connectSelectedJob/pauseJob/currentReport/isConnected/isBusy",
+      "QComboBox::currentData/currentText/ToolTipRole",
+      "QLabel::text"
+    ],
+    "rawPngObservation": [
+      26,
+      38
+    ],
+    "staticChain": [
+      "refreshJobs while connected chooses inspect, not list (ExistingTrainingDialog.cpp:145).",
+      "finishHelper list branch replaces m->jobs (line217); inspect branch validates identity then replaces only m->report (line225).",
+      "refreshPresentation renders combo from m->jobs (lines272-273), but detailed state from m->report (lines277-279).",
+      "Worker inspect_job reads recorded state and liveness from actual job/lease; list_jobs is a bounded projection of inspect_job and is not a mutating repair.",
+      "Existing RuntimeDecouplingUiTests actual owned CPU lease already transitions unverified -> live -> paused/ended, checks clean process exit, and captures observer-ended. It does not assert selected combo caption matches final report."
+    ],
+    "minimalRemoteRedPlan": {
+      "integrationPoint": "Existing observer-ended captureUiFormMatrix optional validator at RuntimeDecouplingUiTests.cpp:321; keep all original pause/clean-exit/non-resume assertions.",
+      "additionalProcesses": 0,
+      "additionalGalleries": 0,
+      "trainingStarted": false,
+      "expectedJobId": "existing owned fixture id of 32 'a' characters",
+      "expectedOutputName": "generated CPU lease fixture",
+      "independentLocaleExpectations": {
+        "zh_CN": {
+          "paused": "已暂停",
+          "ended": "会话已结束"
+        },
+        "en_US": {
+          "paused": "Paused",
+          "ended": "Session Ended"
+        },
+        "ja_JP": {
+          "paused": "一時停止中",
+          "ended": "セッション終了済み"
+        }
+      },
+      "requiredReceipt": [
+        "sourceCommit",
+        "expectedJobId",
+        "reportJobId",
+        "selectedJobId",
+        "observedCaption",
+        "observedToolTip",
+        "detailsText",
+        "currentReport",
+        "afterCurrentReport",
+        "publicStateUnchanged",
+        "status/errors"
+      ],
+      "assertion": "Exact full selected caption/tooltip must combine the existing fixture outputName/id with independently expected paused/ended labels; selected id and full public report must remain unchanged.",
+      "noPreemptiveRefresh": "Do not add list refresh or change values/text before observing RED; it would hide the actual path under review."
+    },
+    "proposedFixAfterRed": "Root may project the already validated current inspect report into the matching attached job's displayed summary, preserving raw job identity/record and all unrelated list rows. This requires real remote RED first; no production or worker mutation made here.",
+    "syntaxCompile": {
+      "status": "PASS",
+      "executionKind": "MSVC /Zs syntax-only; no executable/test/application execution",
+      "exitCode": 0,
+      "command": "call D:\\Apps\\PortableMSVC-2022\\msvc\\setup_x64.bat && cl.exe /nologo /Zs /TP /std:c++20 /Zc:__cplusplus /EHsc /utf-8 /W4 /permissive- /DQT_WIDGETS_LIB /DQT_GUI_LIB /DQT_CORE_LIB /ID:\\CodexProjects\\Ishida_Lab\\Documents\\git\\native\\src /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6 /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtCore /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtGui /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\include\\qt6\\QtWidgets /ID:\\Apps\\GSW\\runtime\\envs\\gsw_native\\Library\\lib\\qt6\\mkspecs\\win32-msvc D:\\CodexProjects\\Ishida_Lab\\Documents\\git\\native\\tests\\ExistingTrainingStateAssertions.h",
+      "output": "ExistingTrainingStateAssertions.h\r\n"
+    },
+    "actualRedObserved": false,
+    "actualGreenObserved": false
+  },
+  "coverageNotClaimed": [
+    "Remaining 152 minimum matrix cells are not human-reviewed by this pass; 300 captures are not 300 visual sign-offs.",
+    "Images are ac5c77b, not e48d535 or later current-source acceptance.",
+    "Not a review of every popup, message box, inline dialog, progress dialog, file-provider dialog, menu, tooltip, dock or shell state from the 66-group static inventory.",
+    "Updater/startup-health/branding surfaces after baseline are not accepted here.",
+    "No native OS scaling/cross-monitor, focus restoration through modal nesting, screen reader or assistive OS provider execution.",
+    "No actual disabled-reason audit, full Tab/Shift-Tab loop, shortcuts and menu-accelerator acceptance.",
+    "No custom QPainter viewport overlay accessibility, gizmo hit behavior, all icon states or physical-DPR coverage.",
+    "No performance remeasurement, no reinterpretation of original FAIL or four INCONCLUSIVE metrics, no training/geometry/quality or NVIDIA evidence.",
+    "No local activation, managed installation change, application restart or user data mutation."
+  ],
+  "images": [
+    {
+      "index": 1,
+      "surfaceId": "DLG-01",
+      "dialogClass": "DatasetImportDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0009.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0009.png",
+      "sha256": "9a36e678219855cb502b1d931345fea0a594afc6812128218f3f0e727e902699",
+      "bytes": 34377,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "import-media-request-narrow",
+      "objectName": "datasetImportDialog",
+      "actualQtClass": "gsw::DatasetImportDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Fields, dark surfaces and fixed Add/Cancel actions readable; top options area has an explicit vertical scrollbar, not treated as clipping."
+    },
+    {
+      "index": 2,
+      "surfaceId": "DLG-01",
+      "dialogClass": "DatasetImportDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0004.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0004.png",
+      "sha256": "425e350c6138d827163927a8a116b317dee7e60fcb2d47c0626143931b8fa752",
+      "bytes": 27047,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "import-media-request-standard",
+      "objectName": "datasetImportDialog",
+      "actualQtClass": "gsw::DatasetImportDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Wide English labels, source list and fixed actions fit; long source path remains selectable list content."
+    },
+    {
+      "index": 3,
+      "surfaceId": "DLG-02",
+      "dialogClass": "ReconstructionDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0021.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0021.png",
+      "sha256": "d7fb6c3a2d6e851f7c11ebd0fc491014a7d40346960753799a35e83b294cc46f",
+      "bytes": 37553,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "reconstruction-request-narrow",
+      "objectName": "",
+      "actualQtClass": "gsw::ReconstructionDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "OBSERVED_TEXT_ISSUE",
+      "observed": "Narrow Chinese layout fits, but COLMAP placeholder explicitly says select drive E although supported installation location is not restricted to E."
+    },
+    {
+      "index": 4,
+      "surfaceId": "DLG-02",
+      "dialogClass": "ReconstructionDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0016.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0016.png",
+      "sha256": "31e50ad329bdf440db1db5d3c049ec64fb09f7a22ca1f976fde3f75b0be17c02",
+      "bytes": 28079,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "reconstruction-request-standard",
+      "objectName": "",
+      "actualQtClass": "gsw::ReconstructionDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "OBSERVED_TEXT_ISSUE",
+      "observed": "Wide English layout fits, same drive-E-only COLMAP placeholder is visible."
+    },
+    {
+      "index": 5,
+      "surfaceId": "DLG-03",
+      "dialogClass": "TrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0045.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0045.png",
+      "sha256": "b797c8dd42ca572349aee9e25b07b8d4fa2d9e4f8929bde19b6adee712ce7105",
+      "bytes": 53027,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "training-2dgs-request-narrow",
+      "objectName": "",
+      "actualQtClass": "gsw::TrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow 2DGS settings, selected resolution, quality-plan and growth-protection controls readable; vertical scrolling is explicit and fixed Start/Cancel actions fit."
+    },
+    {
+      "index": 6,
+      "surfaceId": "DLG-03",
+      "dialogClass": "TrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0040.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0040.png",
+      "sha256": "c6e4b377a093260bcb9286001b0821c6ee7249717ad8a9abdb80cb0ab3e9e65c",
+      "bytes": 43931,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "training-2dgs-request-standard",
+      "objectName": "",
+      "actualQtClass": "gsw::TrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide configuration and quality-first explanatory text readable; inactive quality-plan controls visually distinct. Disabled-state assistive semantics not tested."
+    },
+    {
+      "index": 7,
+      "surfaceId": "DLG-04",
+      "dialogClass": "MeshGenerationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0057.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0057.png",
+      "sha256": "12c1bbe2fbff27675cff9e2edf30de299bcf500f1d21e7f9da1626301bfb4485",
+      "bytes": 44828,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "mesh-generation-request-narrow",
+      "objectName": "meshGenerationDialog",
+      "actualQtClass": "gsw::MeshGenerationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow GS2Mesh options fit the scrollable body; unrelated backend controls visibly inactive. A horizontally scrolled path is not a visual defect."
+    },
+    {
+      "index": 8,
+      "surfaceId": "DLG-04",
+      "dialogClass": "MeshGenerationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0052.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0052.png",
+      "sha256": "f0166c3d431e55dcd61478c871ad8937eb719138bf321d79bcfbe5dbc0be707b",
+      "bytes": 35959,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "mesh-generation-request-standard",
+      "objectName": "meshGenerationDialog",
+      "actualQtClass": "gsw::MeshGenerationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide GS2Mesh form and explanatory paragraph fit; fixed actions visible."
+    },
+    {
+      "index": 9,
+      "surfaceId": "DLG-05",
+      "dialogClass": "ModelExportDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0069.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0069.png",
+      "sha256": "4e351368cbbf8ee6969d3d0c0ae7adf4ef780fab27bcf04844495d2a75eed9e1",
+      "bytes": 42545,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "model-export-request-narrow",
+      "objectName": "modelExportDialog",
+      "actualQtClass": "gsw::ModelExportDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow export options and preservation/coordinate explanation readable. Editable output path is horizontally scrolled normally; Export/Cancel remain visible."
+    },
+    {
+      "index": 10,
+      "surfaceId": "DLG-05",
+      "dialogClass": "ModelExportDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0064.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0064.png",
+      "sha256": "25e1980b52da23bc321eeabe9b82a7b2d561c5c82070d878279d2cf2e4decb73",
+      "bytes": 29187,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "model-export-request-standard",
+      "objectName": "modelExportDialog",
+      "actualQtClass": "gsw::ModelExportDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide export labels, output path and coordinate-provenance explanation readable; fixed actions visible."
+    },
+    {
+      "index": 11,
+      "surfaceId": "DLG-06",
+      "dialogClass": "TaskDetailsDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/surface-0009.png",
+      "imageRelativePath": "forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/surface-0009.png",
+      "sha256": "48fe37504fed8ce47ac250e2ae18f49067509f0a6b38910b35ccd6c5ab67fc25",
+      "bytes": 20560,
+      "reportRelativePath": "forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        360,
+        560
+      ],
+      "physicalImageSize": [
+        360,
+        560
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "retained-task-details-narrow",
+      "objectName": "taskDetailsDialog",
+      "actualQtClass": "gsw::TaskDetailsDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "FOLLOW_UP_NOT_CONFIRMED",
+      "observed": "Chinese dark minimum-width failed-task view has readable state/logs and a horizontal log scrollbar. Export Retained Logs is not directly visible in toolbar; whether native overflow exposes it was not exercised, so reachability remains unverified, not a confirmed missing-action defect. Output path wrapping/elision is not classified as a bug."
+    },
+    {
+      "index": 12,
+      "surfaceId": "DLG-06",
+      "dialogClass": "TaskDetailsDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/surface-0004.png",
+      "imageRelativePath": "forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/surface-0004.png",
+      "sha256": "607dd44f51d92b7cdcae7184e5c56c97995d1f3549a07e19b55e2de8e30e28dd",
+      "bytes": 20454,
+      "reportRelativePath": "forms-core/surfaces/process-908-e7482d75e4d94ed9b1be747cba343105/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        720
+      ],
+      "physicalImageSize": [
+        1000,
+        720
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "retained-task-details-standard",
+      "objectName": "taskDetailsDialog",
+      "actualQtClass": "gsw::TaskDetailsDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide failed-task view exposes all three actions, retained-log policy and raw mixed-language log content without rendering corruption; raw external text is intentionally untranslated."
+    },
+    {
+      "index": 13,
+      "surfaceId": "DLG-07",
+      "dialogClass": "GenerationHistoryDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/surface-0021.png",
+      "imageRelativePath": "forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/surface-0021.png",
+      "sha256": "3ec6f564ab3eb6c44ea298325405ce96315282e8dfd70cde335c142eece1e370",
+      "bytes": 70788,
+      "reportRelativePath": "forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "persisted-generation-history-narrow",
+      "objectName": "generationHistoryDialog",
+      "actualQtClass": "gsw::GenerationHistoryDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow history shows all backend rows and selected GS2Mesh result with explicit unsupported full-state resume reason. JSON editor uses scrollbars and selected text normally."
+    },
+    {
+      "index": 14,
+      "surfaceId": "DLG-07",
+      "dialogClass": "GenerationHistoryDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/surface-0016.png",
+      "imageRelativePath": "forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/surface-0016.png",
+      "sha256": "e2a826132ed7f6873cb349f119a2382352e270f17802fb7faf1161ff972598b0",
+      "bytes": 63646,
+      "reportRelativePath": "forms-core/surfaces/process-4264-83a8ce62fc5c46a9a926e7104ff98013/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        720
+      ],
+      "physicalImageSize": [
+        1000,
+        720
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "persisted-generation-history-standard",
+      "objectName": "generationHistoryDialog",
+      "actualQtClass": "gsw::GenerationHistoryDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide history, disabled resume action and backend limitation explanation readable; native identifiers and user experiment names preserved."
+    },
+    {
+      "index": 15,
+      "surfaceId": "DLG-08",
+      "dialogClass": "QualityComparisonDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0009.png",
+      "imageRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0009.png",
+      "sha256": "151c24f162d84197395b96efda738a4eaf4ebff77b23f9184f8013358b4b071c",
+      "bytes": 60425,
+      "reportRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "quality-comparison-completed-narrow",
+      "objectName": "",
+      "actualQtClass": "gsw::QualityComparisonDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow quality report shows regression limits, unverified evidence wording and existing-file refusal. Long results are vertically scrollable; ordinary table-cell elision is not a defect."
+    },
+    {
+      "index": 16,
+      "surfaceId": "DLG-08",
+      "dialogClass": "QualityComparisonDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0004.png",
+      "imageRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0004.png",
+      "sha256": "45c1b3678a625965141b2a3fbe02b29bb37326db1913ad22f7264d56d18c5984",
+      "bytes": 44966,
+      "reportRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "quality-comparison-completed-standard",
+      "objectName": "",
+      "actualQtClass": "gsw::QualityComparisonDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide quality comparison shows selected-limit semantics, save refusal and unverified rows; vertical scrollbar explicitly supports below-fold results."
+    },
+    {
+      "index": 17,
+      "surfaceId": "DLG-09",
+      "dialogClass": "QualityMeasurementDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/surface-0010.png",
+      "imageRelativePath": "forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/surface-0010.png",
+      "sha256": "0f25b329accd77c082bdf0d50c78265ab7692dae0faa4ffa28417d2e3efa524a",
+      "bytes": 44737,
+      "reportRelativePath": "forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "quality-measurement-completed-narrow",
+      "objectName": "qualityMeasurementDialog",
+      "actualQtClass": "gsw::QualityMeasurementDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow CPU image-measurement result and image-vs-geometry warning readable; full protocol and saved report path wrap visibly; all fixed actions fit."
+    },
+    {
+      "index": 18,
+      "surfaceId": "DLG-09",
+      "dialogClass": "QualityMeasurementDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/surface-0005.png",
+      "imageRelativePath": "forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/surface-0005.png",
+      "sha256": "493bbe8a701273f8e989907d1190c3ff0d229fc945204dd4ff5fad9e434af5fd",
+      "bytes": 31735,
+      "reportRelativePath": "forms-core/surfaces/process-3232-0fd9c771cf9849d889ad0eda55f5fdac/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "quality-measurement-completed-standard",
+      "objectName": "qualityMeasurementDialog",
+      "actualQtClass": "gsw::QualityMeasurementDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide measured-image table, protocol and no-geometry-accuracy disclaimer readable; saved report and baseline/candidate actions visible."
+    },
+    {
+      "index": 19,
+      "surfaceId": "DLG-10",
+      "dialogClass": "ScaleConstraintsDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0012.png",
+      "imageRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0012.png",
+      "sha256": "945743e58e7a6176f4dd3446c0a7ed676bb0fd777287f2d133712f205c2baccd",
+      "bytes": 46974,
+      "reportRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "scale-constraints-adopted-narrow",
+      "objectName": "scaleConstraintsDialog",
+      "actualQtClass": "gsw::ScaleConstraintsDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow scale-only mode, original-frame guidance and fit/check semantics readable. Wide constraint table has explicit horizontal scrollbar; export and final actions fit."
+    },
+    {
+      "index": 20,
+      "surfaceId": "DLG-10",
+      "dialogClass": "ScaleConstraintsDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0007.png",
+      "imageRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0007.png",
+      "sha256": "aa32573b6aed352072fdbddd981c9894803d4104af6a66fdbc0fc8f29d4879cc",
+      "bytes": 44415,
+      "reportRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1100,
+        760
+      ],
+      "physicalImageSize": [
+        1100,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "scale-constraints-adopted-standard",
+      "objectName": "scaleConstraintsDialog",
+      "actualQtClass": "gsw::ScaleConstraintsDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide scale report explicitly separates fit residual from accuracy; table header elision and horizontal scrolling are ordinary table behavior, not a defect. Results and fixed actions readable."
+    },
+    {
+      "index": 21,
+      "surfaceId": "DLG-11",
+      "dialogClass": "InitializationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0032.png",
+      "imageRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0032.png",
+      "sha256": "439e2995716cca6c04ab87e4fc2ed4e17296bc41a65b20e5d04103319b939991",
+      "bytes": 37545,
+      "reportRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        560,
+        620
+      ],
+      "physicalImageSize": [
+        560,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "initializer-suggestion-pending-narrow",
+      "objectName": "initializationDialog",
+      "actualQtClass": "gsw::InitializationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow initialization uses stacked full-width inputs, explicit inner/outer scrollbars and fixed wrapped actions; prior horizontal field-cropping defect not seen here."
+    },
+    {
+      "index": 22,
+      "surfaceId": "DLG-11",
+      "dialogClass": "InitializationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0027.png",
+      "imageRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0027.png",
+      "sha256": "a73196b1b3e32e419f17e39a2458a47881dc12c350813bdd36264aabf80bd933",
+      "bytes": 57868,
+      "reportRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1100,
+        760
+      ],
+      "physicalImageSize": [
+        1100,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "initializer-suggestion-pending-standard",
+      "objectName": "initializationDialog",
+      "actualQtClass": "gsw::InitializationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide suggestion-pending initialization shows inputs beside relationship preview, full actions and explicit non-adoption warning. Ordinary preview table header elision is not classified as a defect."
+    },
+    {
+      "index": 23,
+      "surfaceId": "DLG-12",
+      "dialogClass": "TrainingBatchDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/surface-0010.png",
+      "imageRelativePath": "forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/surface-0010.png",
+      "sha256": "76f22e7b4d6449fb2602b5fae167b4ed7a1ea29fcda4b0b622995587aac2d1a4",
+      "bytes": 43155,
+      "reportRelativePath": "forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        680,
+        620
+      ],
+      "physicalImageSize": [
+        680,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "training-batch-plan-created-narrow",
+      "objectName": "trainingBatchDialog",
+      "actualQtClass": "gsw::TrainingBatchDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow batch form shows backend matrix and serial-GPU warning, with fixed actions wrapped to two rows; content area scrolls independently."
+    },
+    {
+      "index": 24,
+      "surfaceId": "DLG-12",
+      "dialogClass": "TrainingBatchDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/surface-0005.png",
+      "imageRelativePath": "forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/surface-0005.png",
+      "sha256": "26eec227bba938d15032bb626ee86f278fa82f8328834822338c58e6d8696ec4",
+      "bytes": 35902,
+      "reportRelativePath": "forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1100,
+        760
+      ],
+      "physicalImageSize": [
+        1100,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "training-batch-plan-created-standard",
+      "objectName": "trainingBatchDialog",
+      "actualQtClass": "gsw::TrainingBatchDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide batch form preserves full captions for preview/start/verification actions without hiding them; dataset and parameter table elision uses explicit scrolling."
+    },
+    {
+      "index": 25,
+      "surfaceId": "DLG-13",
+      "dialogClass": "ExistingTrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0044.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0044.png",
+      "sha256": "d356b169d6dc7f6d55a812c2a4a8ad14b1fbddde979adf17d991f26708c82a52",
+      "bytes": 35043,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        420,
+        620
+      ],
+      "physicalImageSize": [
+        420,
+        620
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "observer-ended-narrow",
+      "objectName": "existingTrainingDialog",
+      "actualQtClass": "gsw::ExistingTrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark narrow existing-training observer shows paused/session-ended state, raw stop reason and disabled control actions; close remains visible. Combo is elided at this width, so unseen text is not inferred."
+    },
+    {
+      "index": 26,
+      "surfaceId": "DLG-13",
+      "dialogClass": "ExistingTrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0039.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0039.png",
+      "sha256": "a768b31a142246ea4518613a15b0fe401d94517acf3e49f6ac2222e524903dcc",
+      "bytes": 34549,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        840,
+        760
+      ],
+      "physicalImageSize": [
+        840,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "observer-ended-standard",
+      "objectName": "existingTrainingDialog",
+      "actualQtClass": "gsw::ExistingTrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "OBSERVED_STATE_TEXT_INCONSISTENCY",
+      "observed": "Existing-job combo says Running / Liveness Unverified while details and monitor for the same selected job show Paused / Session Ended. This is a visible consistency finding, not yet a runtime transition root cause or completed fix."
+    },
+    {
+      "index": 27,
+      "surfaceId": "DLG-14",
+      "dialogClass": "RuntimeGuardDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0020.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0020.png",
+      "sha256": "c9745f50f631db8cd0f8b578cf3ca1819a481b9f4d9fec06f2ef3eda3c22d04d",
+      "bytes": 30889,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        360,
+        460
+      ],
+      "physicalImageSize": [
+        360,
+        460
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "guard-invalid-narrow",
+      "objectName": "runtimeGuardDialog",
+      "actualQtClass": "gsw::RuntimeGuardDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark minimum-width invalid guard configuration shows explicit unchanged-original warning, inactive OK and visible Cancel. Original values and non-hot-switch explanation readable."
+    },
+    {
+      "index": 28,
+      "surfaceId": "DLG-14",
+      "dialogClass": "RuntimeGuardDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0015.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0015.png",
+      "sha256": "bc1d7d3aa6cd8f7bbe0dc7cdf5f2e5cc4c6b066a84cc1f4ca98f986e5eaf9fce",
+      "bytes": 21309,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        800,
+        390
+      ],
+      "physicalImageSize": [
+        800,
+        390
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "guard-invalid-standard",
+      "objectName": "runtimeGuardDialog",
+      "actualQtClass": "gsw::RuntimeGuardDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide invalid guard configuration and quality-first/complete-state explanation readable; inactive OK distinguishes invalid input while Cancel remains usable."
+    },
+    {
+      "index": 29,
+      "surfaceId": "DLG-15",
+      "dialogClass": "ResourceBudgetDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0011.png",
+      "imageRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0011.png",
+      "sha256": "7cea10aab06e2891419bdfe447864aef5ef394939b47870bb7140b2c804cb945",
+      "bytes": 21952,
+      "reportRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        360,
+        300
+      ],
+      "physicalImageSize": [
+        360,
+        300
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "resource-budget-manual-narrow",
+      "objectName": "resourceBudgetDialog",
+      "actualQtClass": "gsw::ResourceBudgetDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark minimum-size budget form keeps manual controls and Close visible; status rows below fold are explicitly scrollable, not a fixed-area crop."
+    },
+    {
+      "index": 30,
+      "surfaceId": "DLG-15",
+      "dialogClass": "ResourceBudgetDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0006.png",
+      "imageRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0006.png",
+      "sha256": "e312b5c4085aee15d0cf375a9f32eee9a73691ea5c59cbd96702b8ad3a62a513",
+      "bytes": 29017,
+      "reportRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        800,
+        560
+      ],
+      "physicalImageSize": [
+        800,
+        560
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "resource-budget-manual-standard",
+      "objectName": "resourceBudgetDialog",
+      "actualQtClass": "gsw::ResourceBudgetDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide resource budget separates requested limit, measured RAM, unavailable GPU detection and effective budget; full no-reserve-guarantee reason readable."
+    },
+    {
+      "index": 31,
+      "surfaceId": "DLG-16",
+      "dialogClass": "ViewportGridDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/surface-0018.png",
+      "imageRelativePath": "forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/surface-0018.png",
+      "sha256": "90cdbedc9c6a55e9875c88da4fb3f742d551a91113e8f0570884835997bd9e90",
+      "bytes": 25932,
+      "reportRelativePath": "forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "zh_CN",
+      "theme": "dark",
+      "widthBucket": "narrow",
+      "logicalSize": [
+        640,
+        600
+      ],
+      "physicalImageSize": [
+        640,
+        600
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "unknown-unit-grid-controls-narrow",
+      "objectName": "viewportGridDialog",
+      "actualQtClass": "gsw::ViewportGridDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Chinese dark grid form distinguishes display-only units from model/camera/training scale; automatic-mode inactive numeric fields and physical-scale-unavailable reason readable."
+    },
+    {
+      "index": 32,
+      "surfaceId": "DLG-16",
+      "dialogClass": "ViewportGridDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/surface-0013.png",
+      "imageRelativePath": "forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/surface-0013.png",
+      "sha256": "f759bc417a569983fef83560a1d1204f67c04c29f06bc9944694e5e16270a9d2",
+      "bytes": 18698,
+      "reportRelativePath": "forms-core/surfaces/process-616-2a6616b8fa9a4a358bc57fa5f6ab3deb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "en_US",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        900,
+        600
+      ],
+      "physicalImageSize": [
+        900,
+        600
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "unknown-unit-grid-controls-standard",
+      "objectName": "viewportGridDialog",
+      "actualQtClass": "gsw::ViewportGridDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "English wide grid options, undeclared physical scale warning and units all fit; OK/Cancel visible."
+    },
+    {
+      "index": 33,
+      "surfaceId": "DLG-03",
+      "dialogClass": "TrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0042.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0042.png",
+      "sha256": "51ec66d0b393ebaa866c7b5cd24b9d10097213e4376d138a084cc2939fd0504b",
+      "bytes": 69663,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "training-2dgs-request-standard",
+      "objectName": "",
+      "actualQtClass": "gsw::TrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular 2DGS settings, disabled quality-plan fields and quality-first growth protection visible; overflowing long explanation is in explicitly scrollable body and fixed actions remain visible."
+    },
+    {
+      "index": 34,
+      "surfaceId": "DLG-04",
+      "dialogClass": "MeshGenerationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0054.png",
+      "imageRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/surface-0054.png",
+      "sha256": "7cd0737783f22272c3d90076ef6d6b03b53c0d2ee4eb21087c223b6eb6cffed2",
+      "bytes": 47255,
+      "reportRelativePath": "forms-language-matrix/surfaces/process-6176-e5023fc15f044e6494f8997176f841eb/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "mesh-generation-request-standard",
+      "objectName": "meshGenerationDialog",
+      "actualQtClass": "gsw::MeshGenerationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular GS2Mesh form preserves backend labels, disabled unrelated controls and separate result/texture explanation; action captions fit."
+    },
+    {
+      "index": 35,
+      "surfaceId": "DLG-08",
+      "dialogClass": "QualityComparisonDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0006.png",
+      "imageRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/surface-0006.png",
+      "sha256": "ef5a12094820e30096dc103f9f265f036eb0827307137698bbc17c0232943cc8",
+      "bytes": 65085,
+      "reportRelativePath": "forms-core/surfaces/process-1516-4153b5256c8949b88aa520e9d94059ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1000,
+        760
+      ],
+      "physicalImageSize": [
+        1000,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "quality-comparison-completed-standard",
+      "objectName": "",
+      "actualQtClass": "gsw::QualityComparisonDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular quality comparison wraps long limit-verdict/reason cells and preserves unverified/independent-evidence distinctions; existing-file refusal readable, fixed actions visible."
+    },
+    {
+      "index": 36,
+      "surfaceId": "DLG-10",
+      "dialogClass": "ScaleConstraintsDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0009.png",
+      "imageRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/surface-0009.png",
+      "sha256": "f3618707b52a044b4aabd7a7ac641b8f440d29428a7377b6fad7bf9be96517c8",
+      "bytes": 64254,
+      "reportRelativePath": "forms-core/surfaces/process-2436-15924bcfb41d4ce6bbf9f416dc5de97d/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1100,
+        760
+      ],
+      "physicalImageSize": [
+        1100,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "scale-constraints-adopted-standard",
+      "objectName": "scaleConstraintsDialog",
+      "actualQtClass": "gsw::ScaleConstraintsDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular scale-constraint fields and report separate fit residuals from geometry accuracy and independent checks; full action captions fit with explicit content scrolling."
+    },
+    {
+      "index": 37,
+      "surfaceId": "DLG-11",
+      "dialogClass": "InitializationDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0029.png",
+      "imageRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0029.png",
+      "sha256": "916d8b26f2a63e8bcd03672b4c5bb849e61d2ffa2e2012f667d0079ea7283e23",
+      "bytes": 84307,
+      "reportRelativePath": "standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        1100,
+        760
+      ],
+      "physicalImageSize": [
+        1100,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "initializer-suggestion-pending-standard",
+      "objectName": "initializationDialog",
+      "actualQtClass": "gsw::InitializationDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular suggestion-pending initialization shows labeled inputs, preview, unadopted suggestion warning and full action captions. Ordinary preview-column elision remains scrollable."
+    },
+    {
+      "index": 38,
+      "surfaceId": "DLG-13",
+      "dialogClass": "ExistingTrainingDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0041.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0041.png",
+      "sha256": "9f60f3f46238d9db05e78cd223f65a3aacbc49827c543b09a38e8f33fa3d6e16",
+      "bytes": 47506,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        840,
+        760
+      ],
+      "physicalImageSize": [
+        840,
+        760
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "observer-ended-standard",
+      "objectName": "existingTrainingDialog",
+      "actualQtClass": "gsw::ExistingTrainingDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "OBSERVED_STATE_TEXT_INCONSISTENCY",
+      "observed": "Japanese existing-job combo says 実行中 / 生存未確認 while same selected job detail and monitor show 一時停止中 / セッション終了済み. Shared stale-list vs observed-report hypothesis requires a real transition regression; no fix claimed."
+    },
+    {
+      "index": 39,
+      "surfaceId": "DLG-14",
+      "dialogClass": "RuntimeGuardDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0017.png",
+      "imageRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/surface-0017.png",
+      "sha256": "8c9b19bcda11d38fde7ac130438a0513ce51b88def86e48de05bd3310e915f22",
+      "bytes": 33170,
+      "reportRelativePath": "standalone-surfaces/process-2420-d01977f3cf4547c3af6ac35dd2b5ef1c/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        800,
+        390
+      ],
+      "physicalImageSize": [
+        800,
+        390
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "guard-invalid-standard",
+      "objectName": "runtimeGuardDialog",
+      "actualQtClass": "gsw::RuntimeGuardDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular invalid runtime-guard request shows full original-unchanged warning and complete-state-only semantics, inactive OK and visible Cancel."
+    },
+    {
+      "index": 40,
+      "surfaceId": "DLG-15",
+      "dialogClass": "ResourceBudgetDialog",
+      "imagePath": "D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0008.png",
+      "imageRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/surface-0008.png",
+      "sha256": "752c6ff35ac0646cb8fc311b0693630ef14f98576ebd4276f8319042a35b4800",
+      "bytes": 41526,
+      "reportRelativePath": "forms-core/surfaces/process-4476-4dd64724bbd8471ea788581ef8f01661/ui-surfaces.json",
+      "sourceCommit": "ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f",
+      "locale": "ja_JP",
+      "theme": "light",
+      "widthBucket": "regular",
+      "logicalSize": [
+        800,
+        560
+      ],
+      "physicalImageSize": [
+        800,
+        560
+      ],
+      "widgetDpr": 1,
+      "actualWindowsWindowDpi": 96,
+      "syntheticState": "resource-budget-manual-standard",
+      "objectName": "resourceBudgetDialog",
+      "actualQtClass": "gsw::ResourceBudgetDialog",
+      "captureMethod": "QScreen::grabWindow(owned existing native client id)",
+      "actuallyViewed": true,
+      "hashMatchedOriginalReport": true,
+      "verdict": "PASS_REPRESENTATIVE",
+      "observed": "Japanese regular resource budget explains immediate settings, measured RAM vs manual GPU limit and unavailable detector without presenting an unmeasured reserve as safe."
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 #include "ExistingTrainingDialog.h"
 #include "TrainingMonitorWidget.h"
 #include "UiFormVisualProbe.h"
+#include "ExistingTrainingStateAssertions.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -320,7 +321,17 @@ int main(int argc, char **argv) {
     check(observer.currentReport().value("liveness").toString()==QStringLiteral("ended")&&!resume->isEnabled(),"ended session without a complete checkpoint is not presented as optimizer-state resumable");
     check(gsw::tests::captureUiFormMatrix(visualForms,observer,QStringLiteral("observer-ended"),
         QSize(840,760),QSize(420,620),[&]{return QJsonObject{{"report",observer.currentReport()},
-          {"connected",observer.isConnected()},{"selectedJob",jobs->currentData().toString()}};}),
+          {"connected",observer.isConnected()},{"selectedJob",jobs->currentData().toString()}};},[&]{
+          const QString locale=gsw::AppLanguage::current();
+          const QString paused=locale==QStringLiteral("zh_CN")?QStringLiteral("已暂停"):
+              locale==QStringLiteral("ja_JP")?QStringLiteral("一時停止中"):QStringLiteral("Paused");
+          const QString ended=locale==QStringLiteral("zh_CN")?QStringLiteral("会话已结束"):
+              locale==QStringLiteral("ja_JP")?QStringLiteral("セッション終了済み"):QStringLiteral("Session Ended");
+          const auto result=gsw::tests::checkPausedObserverPresentation(observer,id,
+              QStringLiteral("generated CPU lease fixture"),paused,ended);
+          qInfo().noquote()<<"OBSERVER_PRESENTATION"<<QString::fromUtf8(QJsonDocument(result.evidence).toJson(QJsonDocument::Compact));
+          return result.passed;
+        }),
         "owned ended observer native surface matrix preserves the non-resumable report after the original CPU pause contract");
     observer.close();check(!observer.isConnected()&&!observer.isBusy(),"closing observer releases only its own helpers and connection");
     if(owned.state()!=QProcess::NotRunning){owned.kill();owned.waitForFinished(1000);}
