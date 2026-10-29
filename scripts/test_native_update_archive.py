@@ -337,6 +337,30 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
             ARCHIVE.verify_release_archive(archive, report, expected)
         self.assertEqual(caught.exception.code, "update_source_dependency_files_differ")
 
+    def test_official_cargo_vendor_comment_is_non_authorizing_metadata(self):
+        def cargo_metadata(files):
+            name = "native/updater-trust/vendor/owned-fixture/.cargo-checksum.json"
+            checksum = json.loads(files[name][0])
+            checksum["$comment"] = ("This file only protects against accidental modifications. "
+                "It is not a security mechanism and does not protect against malicious changes.")
+            files[name] = json.dumps(checksum).encode(), "cargo-vendor"
+        archive, report, expected = self.candidate(crate_proof=True, mutate_generated=cargo_metadata)
+        proof = ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(proof["registryPackageCount"], 1)
+        self.assertEqual(proof["dependencyArchiveCount"], 1)
+
+    def test_vendor_comment_does_not_admit_unknown_or_unbounded_metadata(self):
+        for extra in ({"unknownCritical": True}, {"$comment": {"not": "text"}}, {"$comment": "x" * 1025}):
+            def cargo_metadata(files):
+                name = "native/updater-trust/vendor/owned-fixture/.cargo-checksum.json"
+                checksum = json.loads(files[name][0])
+                checksum.update(extra)
+                files[name] = json.dumps(checksum).encode(), "cargo-vendor"
+            with self.subTest(extra=next(iter(extra))):
+                archive, report, expected = self.candidate(crate_proof=True, mutate_generated=cargo_metadata)
+                with self.assertRaises(ARCHIVE.ArchiveError):
+                    ARCHIVE.verify_release_archive(archive, report, expected)
+
     def test_missing_raw_crate_or_license_never_becomes_complete_source(self):
         for name, code in (
                 ("native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate", "update_source_dependency_evidence_unavailable"),

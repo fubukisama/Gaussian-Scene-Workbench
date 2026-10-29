@@ -103,11 +103,25 @@ whole-directory loss/corruption, root dual thresholds/exact version/adoption
 retention, fresh-TUF application counters/immutable IDs and persistent global
 revocations. It does not validate later source automatically.
 
-The additional real 60-second expiry slice is tested separately, without OS
+The additional real 60-second expiry slice runs without OS
 clock changes or runtime overrides: a bounded remote issuer keeps ephemeral
 keys only in memory, receives a public trigger after compilation, signs the
-same-root short timestamp, then exits. Cached activation must reject actual
-expiry while historical inspection remains available. Its result must be
-recorded before treating that gate as passed. The integrated real native
-A -> B -> bad C -> retained B -> explicit installed A seam is separate. No
-production root, signing key, public release or channel promotion is configured.
+same-root short timestamp, then exits. Cached activation rejects actual expiry
+while historical inspection remains available. This gate passed in run
+40745705669, job 123018803603, commit
+`82e71320a3604eedc0f804cefc050a446f502e30`: all 11 trust groups ran with no
+skips in 63.455 seconds, including the signed timestamp's real 60-second wait.
+
+The same source's real Qt fixture stable-entry job 123018803552 passed all four
+groups in 30.734 seconds: authenticated A/B, bad-C retention, explicit safe
+rollback, complete installed-file verification, known-revoked startup refusal,
+and refusal to bypass existing trust by downgrading bootstrap to protocol 1.
+Protocol-1 local developer startup without any trust history remains explicitly
+unsigned and is not public publisher authentication. Startup verification and
+process creation use the independent fixed helper under the same installation
+lock; they do not change trust state or kill an already-running application.
+
+These are isolated fixtures, not formal GSW health/rendering acceptance. The
+same run still had an independent source-closure job failure, so these results
+do NOT authorize production delivery or establish a complete release gate.
+No production root, signing key, public release or channel promotion is configured.

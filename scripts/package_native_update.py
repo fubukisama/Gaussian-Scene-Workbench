@@ -542,11 +542,25 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
             if "/" in directory or row["kind"] != "cargo-vendor":
                 _fail("update_source_dependency_metadata_invalid")
             checksum = _json(_source_content(payload, name, hashes))
-            if (not isinstance(checksum, dict) or set(checksum) != {"package", "files"}
-                    or not isinstance(checksum["package"], str)
-                    or checksum["package"] not in locked or checksum["package"] in vendor_roots
-                    or not isinstance(checksum["files"], dict)):
-                _fail("update_source_dependency_metadata_invalid")
+            reason = None
+            if (not isinstance(checksum, dict) or not {"package", "files"} <= set(checksum)
+                    or set(checksum) - {"package", "files", "$comment"}):
+                reason = "schema_invalid"
+            elif "$comment" in checksum and (not isinstance(checksum["$comment"], str) or len(checksum["$comment"]) > 1024):
+                reason = "comment_invalid"
+            elif not isinstance(checksum["package"], str):
+                reason = "package_type_invalid"
+            elif checksum["package"] not in locked:
+                reason = "package_not_in_lock"
+            elif checksum["package"] in vendor_roots:
+                reason = "package_duplicate"
+            elif not isinstance(checksum["files"], dict):
+                reason = "files_type_invalid"
+            if reason is not None:
+                error = ArchiveError("update_source_vendor_checksum_" + reason)
+                if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,192}", directory):
+                    error.sourceComponent = directory
+                raise error
             vendor_roots[checksum["package"]] = directory, checksum
     if set(vendor_roots) != set(locked):
         _fail("update_source_dependency_evidence_unavailable")
