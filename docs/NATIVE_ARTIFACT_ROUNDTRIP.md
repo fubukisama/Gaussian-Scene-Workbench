@@ -28,6 +28,13 @@ all backend and corresponding-source records and their executable binding.
 It does not claim to be a general secret scanner, signature validator, runtime
 test or product acceptance gate. The existing native-only boundary remains.
 
+The read-only verifier addresses deep Windows paths with the extended filesystem
+namespace. It does not change the machine's long-path policy or alter the paths
+recorded by source manifests. The original package's 264-character source path
+was readable through PowerShell but not the QA Python's ordinary namespace;
+the retained first checker receipt records that error. The corrected address
+handling reaches and preserves the actual missing-dotfile rejection instead.
+
 After upload, CI downloads that exact artifact ID into a fresh runner-owned
 directory. It independently compares every staged/downloaded path, byte length
 and SHA-256, including runtime files not named by the two source manifests, and

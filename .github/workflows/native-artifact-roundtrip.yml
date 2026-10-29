@@ -53,14 +53,19 @@ jobs:
       - name: Require the real filtered artifact to be rejected
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference=$false
           & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
             --root "$env:GSW_ARTIFACT_ROUNDTRIP/filtered" --baseline "$env:GSW_ARTIFACT_ROUNDTRIP/expected" `
             --output "$env:GSW_ARTIFACT_ROUNDTRIP/negative-control.json"
-          if($LASTEXITCODE -ne 2){throw 'The previous hidden-file filter did not reach the required red seam.'}
+          $rejectionCode=$LASTEXITCODE
+          if($rejectionCode -ne 2){throw 'The previous hidden-file filter did not reach the required red seam.'}
           $receipt=Get-Content "$env:GSW_ARTIFACT_ROUNDTRIP/negative-control.json" -Raw|ConvertFrom-Json
           if($receipt.status -cne 'FAIL' -or $receipt.error -notmatch 'manifest file missing: gaussian-splatting/\.git'){
             throw 'The negative control failed for a different reason.'
           }
+          # The native CLI must reject the negative control. Only after both
+          # assertions have succeeded may the PowerShell step itself succeed.
+          exit 0
       - name: Upload controlled payload including required hidden source
         uses: actions/upload-artifact@v7
         id: complete
