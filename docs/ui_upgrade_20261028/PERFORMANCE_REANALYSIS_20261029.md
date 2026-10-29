@@ -1,7 +1,45 @@
 # Archived native UI performance reanalysis — 2026-10-29
 
-Status: **PREPARED / REMOTE CONTRACTS AND REANALYSIS NOT RUN**. This file records
-the candidate protocol, not a new performance PASS or full UI acceptance.
+Status: **ARCHIVED REANALYSIS COMPLETED / INCONCLUSIVE / NOT FULL ACCEPTANCE**.
+Both remote runs replayed the same 24 original receipts. The result is 45
+comparisons: **41 PASS, 4 INCONCLUSIVE, 0 FAIL**. This is a contract/provenance
+reanalysis, not new timing, a blanket “no performance regression” claim, or
+acceptance of the current product binary.
+
+## Executed analysis identity and retained first failure
+
+| Remote run / exact source | Job | Observed outcome |
+|---|---|---|
+| [40821150392](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821150392), `0d3f381746726835b38e7c0709f985f021f2593c` | [123273671106](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821150392/job/123273671106) | 26 live + 13 archive CLI contracts OK; all reanalysis assertions completed; job FAIL due to PowerShell propagating the expected checker exit code 3 |
+| [40821404151](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821404151), `afe668eb8cacaf6b06ba0ae15794467584df8eab` | [123274473165](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40821404151/job/123274473165) | 26 live + 13 archive CLI contracts OK; same reanalysis result; job SUCCESS after an explicit final `exit 0` for completed replay |
+
+The second source change only fixes the workflow's completed-INCONCLUSIVE exit
+handling: structural/numerical FAILs still throw before that exit. No evaluator,
+threshold, noise rule, receipt, original result, or timing producer changed.
+The first failed run and direct log are retained; it is not relabelled SUCCESS.
+
+Both `reanalysis.json` files have SHA256
+`115e5ef9f79f6c4d1a1a46a0269cfd8caa9500a971350f2b8147e81ce7c2b3b1`
+and retain 24 raw summaries, zero failures, 45 comparisons, and exactly the four
+observed original medium INCONCLUSIVE metrics. Identical analysis bytes do not
+make their run/source identities interchangeable: each request receipt binds
+its own analysis commit/run to the same checker and adapter bytes.
+
+| Binding | Run 40821150392 | Run 40821404151 |
+|---|---|---|
+| Evidence artifact ID | `12874064675` | `12873764727` |
+| Request receipt SHA256 | `1857a9bbe82df57ea1687412488d94d21d3328b1563f7129a693256830d2bc16` | `f45c9111494fc2ba0d7fdb308aa02fcb1224a3874b2bda2fd8aef13beac822b4` |
+| Direct job log SHA256 | `6b0dc5255d150edc6e0b9f3e4b63f392b6b24246d73d8087dd095ff61822e514` | `e886731d370ad8e68aee903bd337da421d62b95c44f0a8a1cb5374bc27220b95` |
+
+Shared checker SHA256:
+`32f67fb57d9be58f93d914f1a8fbdd5148e3d849d13f7d9b6193c84c344cfe53`;
+archive adapter SHA256:
+`8529ad2a0644a16c326f5168880b8d3777a2216e008f5c07e099c804c5aae4f7`.
+Read-only local copies and direct logs are in
+`D:/Codex/validation/gsw-ui-upgrade-20261028/performance-reanalysis-run40821150392/`
+and `.../performance-reanalysis-run40821404151/`, with each payload in `evidence/`.
+No checker or test was rerun locally and these artifacts were not redownloaded
+for this documentation update.
 
 ## Immutable input and distinct new identity
 
@@ -16,8 +54,9 @@ Its server ZIP SHA256 is
 
 The manual `Native UI Archived Performance Reanalysis` workflow verifies these
 fixed GitHub artifact/run metadata values and the exact downloaded ZIP digest.
-It downloads this artifact once, verifies ZIP CRCs during safe extraction, and
-uses all 24 original receipts. No process is started and no timing is repeated.
+Each replay downloads this artifact once, verifies ZIP CRCs during safe extraction,
+and uses all 24 original receipts. No GSW/measurement process is started and no
+timing is repeated.
 The new result and request receipt carry the new analysis run/source/checker
 identity; they do not rename the original source or promote a newer product.
 
@@ -77,14 +116,20 @@ contracts use their own explicit test-only pins, never the original production
 identity. Modified raw receipts, fixture bytes/counts, source labels or source
 receipts, After-only uploads, bad ZIP pins and traversal entries are rejected.
 
-## Execution boundary and remaining gate
+## Execution boundary and remaining gates
 
-Locally: source edits and static AST/YAML/JSON parsing only. No checker, automated
-test, application, GUI, GPU command, or benchmark is run. The workflow needs only
-Python 3.12 and read access to Actions artifacts; no Qt/build/CUDA dependency.
-Remote execution is pending root review, commit, push, and one manual dispatch.
-If the original artifact has expired or any pin differs, stop with that direct
-failure; do not replace it with regenerated fixtures or fresh measurements.
+Locally: source/docs edits, static parsing, and read-only file/receipt/digest
+inspection only. No checker, automated test, application, GUI, GPU command, or
+benchmark ran. The remote workflow used Python 3.12 and read access to Actions
+artifacts; it did not build Qt/GSW or invoke CUDA. Both remote requests and results
+record `applicationExecuted: false` and `newMeasurementsTaken: false`.
+
+The contract correction removes the original cross-process lifetime-counter
+identity failure, but does **not** establish an overall performance PASS: four
+medium cadence metrics remain INCONCLUSIVE under the unchanged frozen baseline
+noise policy. No retiming or selection of favourable rounds was used. Numerical
+PASS comparisons are confined to these original, source-bound scheduling
+receipts; they are not new measurements of the latest main/EXE.
 
 The original Windows software-GL slice cannot close user NVIDIA hardware,
 cross-monitor DPR, GPU milliseconds/VRAM, remaining full UI/installation, or

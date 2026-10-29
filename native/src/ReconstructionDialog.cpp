@@ -79,7 +79,7 @@ ReconstructionDialog::ReconstructionDialog(const QString &datasetPath,
   mExecutable = new QLineEdit(
       findColmapExecutable(repositoryRoot, savedExecutable), executableRow);
   mExecutable->setObjectName(QStringLiteral("reconstructionExecutable"));
-  AppLanguage::bind(mExecutable, "placeholderText", AppLanguage::source("选择 E 盘上的 colmap.exe"));
+  AppLanguage::bind(mExecutable, "placeholderText", AppLanguage::source("选择 COLMAP 可执行文件"));
   auto *browseButton = AppLanguage::text(new QPushButton(QCoreApplication::translate("Workbench", "浏览..."), executableRow), AppLanguage::source("浏览..."));
   AppLanguage::bind(browseButton, "toolTip", AppLanguage::source("选择 COLMAP 可执行文件"));
   executableLayout->addWidget(mExecutable, 1);

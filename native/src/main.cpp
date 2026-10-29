@@ -46,6 +46,7 @@
 #include "UiSurfaceEvidence.h"
 #include "GizmoViewportSmokeTest.h"
 #include "UiCrashDiagnostics.h"
+#include "NativeGridQaTrace.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -112,10 +113,15 @@ bool configureWindowsApplicationIdentity() {
 #endif
 
 int main(int argc, char *argv[]) {
+  gsw::qa::NativeGridQaTrace gridQaTrace(argc, argv);
+  using GridQaPhase = gsw::qa::NativeGridQaPhase;
 #ifdef _WIN32
+  gridQaTrace.mark(GridQaPhase::WindowsIdentityBegin);
   if (!configureWindowsApplicationIdentity()) {
+    gridQaTrace.mark(GridQaPhase::WindowsIdentityFailed);
     return 4;
   }
+  gridQaTrace.mark(GridQaPhase::WindowsIdentityEnd);
 #endif
 
   QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
@@ -155,7 +161,9 @@ int main(int argc, char *argv[]) {
   format.setSwapInterval(requestedSwapInterval);
   QSurfaceFormat::setDefaultFormat(format);
 
+  gridQaTrace.mark(GridQaPhase::QApplicationBegin);
   QApplication application(argc, argv);
+  gridQaTrace.mark(GridQaPhase::QApplicationEnd);
   // Keep the established settings identity; the public product name is display-only.
   QCoreApplication::setOrganizationName(QStringLiteral("GaussianSceneWorkbench"));
   QCoreApplication::setOrganizationDomain(QStringLiteral("github.com/fubukisama"));
@@ -208,7 +216,9 @@ int main(int argc, char *argv[]) {
                 QGuiApplication::primaryScreen())
           : gsw::AppTheme::loadScalePercent(
                 QGuiApplication::primaryScreen());
+  gridQaTrace.mark(GridQaPhase::ThemeBegin);
   gsw::AppTheme::apply(application, scalePercent, false);
+  gridQaTrace.mark(GridQaPhase::ThemeEnd);
   application.setProperty("gswAutomaticUiScale",
                           scaleMode == gsw::UiScaleMode::Automatic);
 
@@ -465,6 +475,7 @@ int main(int argc, char *argv[]) {
     qCritical() << "Invalid UI language or missing embedded translation catalog:" << languageOverride;
     return 5;
   }
+  gridQaTrace.mark(GridQaPhase::LanguageReady);
   gsw::AppTheme::apply(application, scalePercent, false);
 
   if (parser.isSet(blenderViewportSmokeTestOption)) {
@@ -474,7 +485,9 @@ int main(int argc, char *argv[]) {
   application.setProperty("gswInitialMediaSources",
                           parser.values(mediaSourceOption));
   gsw::WindowUi::install();
+  gridQaTrace.mark(GridQaPhase::MainWindowBegin);
   gsw::MainWindow window;
+  gridQaTrace.mark(GridQaPhase::MainWindowEnd);
   QString projectPath = parser.value(projectOption);
   const bool importDialogSmokeTest = parser.isSet(importDialogSmokeTestOption);
   const bool displayLayoutSmokeTest =
@@ -584,7 +597,9 @@ int main(int argc, char *argv[]) {
     if (auto *viewport = window.findChild<gsw::NativeViewport *>())
       viewport->setUiPaintObservationEnabled(true);
   }
+  gridQaTrace.mark(GridQaPhase::ShowBegin);
   window.show();
+  gridQaTrace.mark(GridQaPhase::ShowEnd);
   if (!smokeTest && !gsw::setManagedTaskbarRelaunch(
           reinterpret_cast<void *>(window.winId()), QCoreApplication::applicationFilePath(),
           QStringLiteral(GSW_APP_USER_MODEL_ID))) {
@@ -1695,6 +1710,7 @@ int main(int argc, char *argv[]) {
           application.exit(smokeTestFailureCode);
         });
   } else if (infiniteGridSmokeTest) {
+    gridQaTrace.mark(GridQaPhase::GridBranch);
     struct InfiniteGridSmokeState {
       enum class Stage { InitialFrame, AxisPose, AxisFrame };
       Stage stage = Stage::InitialFrame;
@@ -1703,12 +1719,14 @@ int main(int argc, char *argv[]) {
     };
     const auto gridState = std::make_shared<InfiniteGridSmokeState>();
     gridState->deadline.start();
+    gridQaTrace.mark(GridQaPhase::GridDeadlineStarted);
     auto *gridPoll = new QTimer(&application);
     gridPoll->setTimerType(Qt::PreciseTimer);
     gridPoll->setInterval(16);
     QObject::connect(gridPoll, &QTimer::timeout, &application,
         [&application, &window, &smokeTestCompleted, &smokeTestFailureCode,
-         gridState, gridPoll]() {
+         gridState, gridPoll, &gridQaTrace]() {
+          gridQaTrace.mark(GridQaPhase::GridFirstPoll);
           auto *viewport =
               qobject_cast<gsw::NativeViewport *>(window.centralWidget());
           if (viewport == nullptr) {
@@ -1724,27 +1742,43 @@ int main(int argc, char *argv[]) {
               std::abs(angles.rollDegrees) <= 1.0e-6F;
           if (gridState->deadline.elapsed() >= 10000) {
             gridPoll->stop();
-            viewport->grabFramebuffer().save(QDir::temp().filePath(
-                QStringLiteral("gsw-infinite-grid-smoke.png")));
+            gridQaTrace.mark(GridQaPhase::TimeoutDetected);
             qCritical() << "Infinite-grid synchronization timed out: stage"
                         << static_cast<int>(gridState->stage)
                         << "yaw/pitch/roll" << angles.yawDegrees
                         << angles.pitchDegrees << angles.rollDegrees
                         << "orthographic" << viewport->orthographicProjection()
                         << "rendered-frame" << viewport->renderedFrameSerial();
+            gridQaTrace.mark(GridQaPhase::TimeoutFramebufferBegin);
+            viewport->grabFramebuffer().save(QDir::temp().filePath(
+                QStringLiteral("gsw-infinite-grid-smoke.png")));
+            gridQaTrace.mark(GridQaPhase::TimeoutFramebufferEnd);
             smokeTestFailureCode = 7;
             application.exit(smokeTestFailureCode);
             return;
           }
           if (gridState->stage == InfiniteGridSmokeState::Stage::InitialFrame) {
+            if (gridQaTrace.enabled()) {
+              if (window.windowHandle() && window.windowHandle()->isExposed())
+                gridQaTrace.mark(GridQaPhase::GridWindowExposed);
+              if (viewport->isValid()) gridQaTrace.mark(GridQaPhase::GridWidgetValid);
+              if (viewport->context() && viewport->context()->isValid())
+                gridQaTrace.mark(GridQaPhase::GridContextValid);
+              if (viewport->renderedFrameSerial() != 0)
+                gridQaTrace.mark(GridQaPhase::GridFirstFrameObserved);
+            }
             if (window.windowHandle() == nullptr ||
                 !window.windowHandle()->isExposed() || !viewport->isValid() ||
                 viewport->context() == nullptr || !viewport->context()->isValid() ||
                 viewport->renderedFrameSerial() == 0) {
               return;
             }
+            gridQaTrace.mark(GridQaPhase::GridInitialFrameReady);
+            gridQaTrace.mark(GridQaPhase::InitialFramebufferBegin);
             viewport->grabFramebuffer().save(QDir::temp().filePath(
                 QStringLiteral("gsw-infinite-grid-initial.png")));
+            gridQaTrace.mark(GridQaPhase::InitialFramebufferEnd);
+            gridQaTrace.mark(GridQaPhase::InitialInputBegin);
             const QPointF start(viewport->width() * 0.5,
                                 viewport->height() * 0.5);
             const QPointF moved = start + QPointF(5000.0, 0.0);
@@ -1787,7 +1821,10 @@ int main(int argc, char *argv[]) {
                 Qt::NoButton, Qt::NoModifier);
             QCoreApplication::sendEvent(viewport, &projectionPress);
             QCoreApplication::sendEvent(viewport, &projectionRelease);
+            gridQaTrace.mark(GridQaPhase::InitialInputEnd);
+            gridQaTrace.mark(GridQaPhase::AxisViewBegin);
             viewport->setAxisView(gsw::NavigationAxis::PositiveX);
+            gridQaTrace.mark(GridQaPhase::AxisViewEnd);
             gridState->stage = InfiniteGridSmokeState::Stage::AxisPose;
             return;
           }
@@ -1796,13 +1833,16 @@ int main(int argc, char *argv[]) {
           // Observe the requested public pose, then require a newer paint;
           // never wait for the pixel oracle itself to become favourable.
           if (!atPositiveX || !viewport->orthographicProjection()) return;
+          gridQaTrace.mark(GridQaPhase::AxisPoseReady);
           if (gridState->stage == InfiniteGridSmokeState::Stage::AxisPose) {
             gridState->poseFrameSerial = viewport->renderedFrameSerial();
             gridState->stage = InfiniteGridSmokeState::Stage::AxisFrame;
             viewport->update();
+            gridQaTrace.mark(GridQaPhase::AxisFrameRequested);
             return;
           }
           if (viewport->renderedFrameSerial() <= gridState->poseFrameSerial) return;
+          gridQaTrace.mark(GridQaPhase::AxisFrameReady);
           gridPoll->stop();
           int visibleGridPixels = 0;
           int distantGridPixels = 0;
@@ -1812,7 +1852,9 @@ int main(int argc, char *argv[]) {
           QRect distantSampleRect;
           QImage frame;
           if (viewport != nullptr) {
+            gridQaTrace.mark(GridQaPhase::FinalFramebufferBegin);
             frame = viewport->grabFramebuffer();
+            gridQaTrace.mark(GridQaPhase::FinalFramebufferEnd);
             sampleRect = QRect(
                 qRound(frame.width() * 0.30),
                 qRound(frame.height() * 0.45),
@@ -1869,9 +1911,12 @@ int main(int argc, char *argv[]) {
             exitCode = 6;
           }
           if (!frame.isNull()) {
+            gridQaTrace.mark(GridQaPhase::FinalScreenshotBegin);
             frame.save(QDir::temp().filePath(
                 QStringLiteral("gsw-infinite-grid-smoke.png")));
+            gridQaTrace.mark(GridQaPhase::FinalScreenshotEnd);
           }
+          gridQaTrace.mark(GridQaPhase::GridVerdict);
           qInfo() << "Infinite-grid smoke:" << "viewport" << (viewport != nullptr)
                   << "shader" << gridRenderingAvailable << "fixed-origin"
                   << gridOriginFixed << "visible-pixels" << visibleGridPixels
@@ -2386,6 +2431,8 @@ int main(int argc, char *argv[]) {
       application.exit(smokeTestCompleted ? 0 : 2);
     });
   }
+  gridQaTrace.mark(GridQaPhase::EventLoopBegin);
   const int exitCode = application.exec();
+  gridQaTrace.mark(GridQaPhase::EventLoopEnd);
   return smokeTestCompleted ? exitCode : smokeTestFailureCode;
 }

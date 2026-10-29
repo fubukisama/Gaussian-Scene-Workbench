@@ -356,10 +356,35 @@ jobs:
         run: ./scripts/setup_native_ci_graphics.ps1
 
       - name: Verify native graphics bootstrap
+        id: native-graphics-bootstrap
         shell: pwsh
         env:
           QT_FORCE_STDERR_LOGGING: "1"
-        run: ctest --test-dir native/build-ci -C Release --no-tests=error -R "^(system_resource_probe|native_infinite_reference_grid|native_light_gaussian_interaction|native_textured_paged_mesh_scene)$" --output-on-failure
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          # Observe the original bootstrap once in its normal full CI run.
+          # No timeout, Qt/provider, camera, capture or retry changes.
+          $base = $env:RUNNER_TEMP
+          if (Test-Path -LiteralPath 'D:/a/_temp' -PathType Container) { $base = 'D:/a/_temp' }
+          $root = Join-Path $base 'gsw-grid-bootstrap'
+          if (Test-Path -LiteralPath $root) { throw 'A fresh owned bootstrap evidence root is required.' }
+          New-Item -ItemType Directory -Path $root | Out-Null
+          $temporary = Join-Path $root 'temp'
+          New-Item -ItemType Directory -Path $temporary | Out-Null
+          $env:TEMP = $temporary
+          $env:TMP = $temporary
+          $env:GSW_GRID_QA_TRACE = '1'
+          $env:GSW_GRID_QA_TRACE_FILE = Join-Path $root 'grid-phase.jsonl'
+          [ordered]@{schema='gsw.grid_bootstrap_trace_request/1';sourceCommit=$env:GITHUB_SHA;
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            executableSha256=(Get-FileHash -LiteralPath 'native/build-ci/Release/Gaussian Scene Workbench.exe').Hash.ToLowerInvariant();
+            testTimeoutSeconds=15;internalGridDeadlineSeconds=10;applicationInvocations='original CTest selection only';
+            newCapturesAdded=$false;retriesAdded=$false;localExecution=$false} |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $root 'trace-request.json') -Encoding utf8
+          ctest --test-dir native/build-ci -C Release --no-tests=error -R "^(system_resource_probe|native_infinite_reference_grid|native_light_gaussian_interaction|native_textured_paged_mesh_scene)$" --output-on-failure --output-log "$root/bootstrap.log"
+          $bootstrapExit = $LASTEXITCODE
+          exit $bootstrapExit
 
       - name: Test
         timeout-minutes: 50
@@ -381,6 +406,8 @@ jobs:
             native/build-ci/native-managed-installation.log
             ${{ runner.temp }}/gsw-infinite-grid-initial.png
             ${{ runner.temp }}/gsw-infinite-grid-smoke.png
+            D:/a/_temp/gsw-grid-bootstrap/
+            ${{ runner.temp }}/gsw-grid-bootstrap/
           if-no-files-found: warn
           retention-days: 7
 
