@@ -577,7 +577,27 @@ def _verify_dependencies(payload, hashes: dict, recorded: set, rows: list) -> di
         members = _crate_members(payload, archive_name, package, budget)
         prefix = root + "vendor/" + directory + "/"
         if checksum["files"] != {path: row["sha256"] for path, row in members.items()}:
-            _fail("update_source_dependency_files_differ")
+            declared, expected_files = checksum["files"], {path: row["sha256"] for path, row in members.items()}
+            missing, extra = set(expected_files) - set(declared), set(declared) - set(expected_files)
+            known, categories = set(), set()
+            for relative in missing:
+                parts = relative.split("/")
+                if ".git" in parts:
+                    known.add(relative); categories.add("git-directory")
+                elif parts[-1] == ".gitignore":
+                    known.add(relative); categories.add("gitignore")
+                elif parts[-1] == ".gitattributes":
+                    known.add(relative); categories.add("gitattributes")
+                elif relative == ".cargo-ok":
+                    known.add(relative); categories.add("cargo-marker")
+            error = ArchiveError("update_source_dependency_files_differ")
+            if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,192}", directory):
+                error.sourceComponent = directory
+            error.sourceDifference = {"missingCount": len(missing), "extraCount": len(extra),
+                "changedCount": sum(declared[name] != expected_files[name] for name in set(declared) & set(expected_files)),
+                "knownCargoFilteredCount": len(known), "otherMissingCount": len(missing - known),
+                "metadataCategories": sorted(categories)}
+            raise error
         for path, row in members.items():
             actual = generated.get(prefix + path)
             if (actual is None or actual["kind"] != "cargo-vendor" or actual["size"] != row["size"]

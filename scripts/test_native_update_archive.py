@@ -99,7 +99,7 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
         self.sequence = 0
 
     def candidate(self, *, changed_source=False, generated=False, crate_proof=False,
-                  mutate_generated=None, raw_crate_override=None, mutate_tracked=None):
+                  mutate_generated=None, raw_crate_override=None, mutate_tracked=None, crate_extra_files=None):
         self.sequence += 1
         source = {"native/CMakeLists.txt": b"# independently tracked source\n",
                   ".github/workflows/check.yml": b"name: isolated source fixture\n"}
@@ -109,6 +109,8 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
                 "src/lib.rs": b"// owned test source; never compiled or executed\n",
                 "LICENSE": b"owned test license bytes\n",
                 ".cargo_vcs_info.json": b'{"git":{"sha1":"0000000000000000000000000000000000000000"}}'}
+            if crate_extra_files:
+                crate_files.update(crate_extra_files)
             buffer = io.BytesIO()
             with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT) as crate:
                 for name, data in sorted(crate_files.items()):
@@ -360,6 +362,30 @@ class ReleaseArchiveReadbackTests(unittest.TestCase):
                 archive, report, expected = self.candidate(crate_proof=True, mutate_generated=cargo_metadata)
                 with self.assertRaises(ARCHIVE.ArchiveError):
                     ARCHIVE.verify_release_archive(archive, report, expected)
+
+    def test_exact_cargo_projection_keeps_original_metadata_in_lock_bound_archive(self):
+        def cargo_projection(files):
+            prefix = "native/updater-trust/vendor/owned-fixture/"
+            checksum = json.loads(files[prefix + ".cargo-checksum.json"][0])
+            for name in (".gitignore", ".gitattributes"):
+                files.pop(prefix + name)
+                checksum["files"].pop(name)
+            files[prefix + ".cargo-checksum.json"] = json.dumps(checksum).encode(), "cargo-vendor"
+        archive, report, expected = self.candidate(crate_proof=True,
+            crate_extra_files={".gitignore": b"owned ignored-file rules\n", ".gitattributes": b"* -text\n"},
+            mutate_generated=cargo_projection)
+        before = archive.read_bytes()
+        proof = ARCHIVE.verify_release_archive(archive, report, expected)
+        self.assertEqual(proof["vendorProjectionId"], "cargo-vendor-1.99.1")
+        self.assertEqual(proof["originalRegistryFileCount"], 6)
+        self.assertEqual(proof["vendoredRegistryFileCount"], 4)
+        self.assertEqual(proof["filteredRegistryMetadataFileCount"], 2)
+        self.assertEqual(archive.read_bytes(), before)
+        with zipfile.ZipFile(archive) as bundle:
+            raw = bundle.read("source/native/updater-trust/vendor-archives/owned-fixture-1.0.0.crate")
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as original:
+                self.assertIn("owned-fixture-1.0.0/.gitignore", original.getnames())
+                self.assertIn("owned-fixture-1.0.0/.gitattributes", original.getnames())
 
     def test_missing_raw_crate_or_license_never_becomes_complete_source(self):
         for name, code in (

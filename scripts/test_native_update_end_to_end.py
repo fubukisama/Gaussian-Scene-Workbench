@@ -141,6 +141,7 @@ class EndToEnd(unittest.TestCase):
                     kernel.CloseHandle(handle)
             self.steps.append({"step": "launch-" + label, "buildId": build, "realQtWindow": True,
                                "formalGswAcceptance": False})
+            return record
         finally:
             if process.poll() is None:
                 process.kill()
@@ -400,6 +401,45 @@ class EndToEnd(unittest.TestCase):
             "scope": "real-qt-fixture-stable-launcher-only", "steps": self.steps,
             "trustHighWaterAfterRollback": 3, "bootstrapUnchanged": True, "userSentinelsUnchanged": True,
             "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
+
+    def test_health_confirmation_is_bound_to_actual_window_surface_build_exe_and_pid(self):
+        original_root, original_helper = self.installation, self.helper
+        root = Path(self.preparation["root"]) / "startup-health-installation"
+        root.mkdir()
+        shutil.copytree(original_root / "bin", root / "bin")
+        shutil.copytree(original_root / "user-data", root / "user-data")
+        shutil.copyfile(original_root / "bootstrap.json", root / "bootstrap.json")
+        self.installation, self.helper = root, root / "bin" / original_helper.name
+        try:
+            self.select("B")
+            self.helper_request("health-install-B", "--install", "stable")
+            pointer = self.active("fixture-b")
+            slots, data = tree_hashes(root / "versions"), tree_hashes(root / "user-data")
+            record = self.launch("B")
+            self.assertIs(record.get("viewportPainted"), True)
+            self.assertEqual(record.get("healthScope"), "qt-fixture-window-surface")
+            status = self.helper_request("health-query-B", "--startup-status")[-1]
+            self.assertEqual(status.get("phase"), "startup_status")
+            self.assertEqual(status.get("code"), "HEALTHY")
+            attempt = status["attempt"]
+            self.assertEqual(attempt["buildId"], "fixture-b")
+            self.assertEqual(attempt["executableSha256"], digest(root / "versions/fixture-b/bin/Gaussian Scene Workbench.exe"))
+            self.assertEqual(attempt["pid"], record["pid"])
+            self.assertRegex(attempt["attemptId"], "^[0-9a-f]{32}$")
+            self.assertRegex(attempt["processCreationTime"], "^[0-9a-f]{16}$")
+            self.assertNotEqual(attempt["processCreationTime"], "0" * 16)
+            self.assertEqual(attempt["healthScope"], "qt-fixture-window-surface")
+            self.assertNotIn("nonce", attempt)
+            self.assertNotIn("pipeName", attempt)
+            self.assertEqual(self.active("fixture-b"), pointer)
+            self.assertEqual(tree_hashes(root / "versions"), slots)
+            self.assertEqual(tree_hashes(root / "user-data"), data)
+            write_json(self.evidence / "startup-health-result.json", {"passed": True, "testOnly": True,
+                "formalGswAcceptance": False, "scope": "qt-fixture-window-surface",
+                "attempt": attempt, "sourceCommit": self.preparation["sourceCommit"],
+                "sourceTree": self.preparation["sourceTree"]})
+        finally:
+            self.installation, self.helper = original_root, original_helper
 
     def test_legacy_protocol1_without_trust_keeps_explicit_local_developer_startup(self):
         original_root, original_helper = self.installation, self.helper

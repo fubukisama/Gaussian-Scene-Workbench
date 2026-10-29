@@ -79,6 +79,31 @@ private slots:
     QCOMPARE(result.receivedBytes, r.expectedLength);
     QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
   }
+  void followsAnApprovedRelativeHttpsRedirectWithoutCookiesOrUrlLogging() {
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto r = request(QStringLiteral("/redirect?test_only_token=never_log_this_fixture_value"),
+        QStringLiteral("approved-redirect.bin"));
+    const auto result = download(r, policy());
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+    QList<QJsonObject> requests;
+    const auto raw = read(logPath).mid(previousLogSize);
+    QVERIFY(!raw.contains("never_log_this_fixture_value"));
+    for (const auto &line : raw.split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (!row.isEmpty()) requests.append(row);
+    }
+    QCOMPARE(requests.size(), qsizetype(2));
+    QCOMPARE(requests[0].value("path").toString(), QStringLiteral("/redirect"));
+    QCOMPARE(requests[1].value("path").toString(), QStringLiteral("/payload"));
+    for (const auto &row : requests) {
+      QVERIFY(!row.value("cookie_present").toBool());
+      QVERIFY(!row.value("authorization_present").toBool());
+      QCOMPARE(row.value("accept_encoding").toString(), QStringLiteral("identity"));
+    }
+  }
   void cancellationRetainsOwnedStrongEtagPrefixAndResumesActualHttpsRange() {
     auto r = request(QStringLiteral("/slow"), QStringLiteral("resume.bin"));
     QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));

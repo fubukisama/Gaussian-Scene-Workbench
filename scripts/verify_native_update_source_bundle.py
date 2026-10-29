@@ -162,6 +162,13 @@ def main():
         component = getattr(error, "sourceComponent", None)
         if isinstance(component, str) and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,192}", component):
             result["crateDirectory"] = component
+        difference = getattr(error, "sourceDifference", None)
+        counters = ("missingCount", "extraCount", "changedCount", "knownCargoFilteredCount", "otherMissingCount")
+        if (isinstance(difference, dict) and all(type(difference.get(key)) is int and 0 <= difference[key] <= 100000 for key in counters)
+                and isinstance(difference.get("metadataCategories"), list)
+                and set(difference["metadataCategories"]) <= {"git-directory", "gitignore", "gitattributes", "cargo-marker"}):
+            result["sourceDifference"] = {key: difference[key] for key in counters}
+            result["sourceDifference"]["metadataCategories"] = list(difference["metadataCategories"])
         print(json.dumps(result, ensure_ascii=True))
         if OWNED_EVIDENCE == args.evidence.absolute():
             try:
