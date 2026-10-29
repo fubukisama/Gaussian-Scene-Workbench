@@ -44,14 +44,38 @@ build itself. A future authorized production build must run the developer probe
 as an explicit configuration gate before packaging. No such production build,
 profile or packaging authorization is created here.
 
-## Remote RED evidence and current acceptance gate
+## Remote RED and scoped functional GREEN evidence
 
 The initial feature was an intentional stub returning `None`. Actual remote run
 `40804929618`, job `123221480977`, at source commit `ebb0e35` recorded the default
 `NOT_CONFIGURED` positive and then failed the configured-profile assertion with
 `NOT_CONFIGURED != CONFIGURED` at `02:16:47 UTC`. This was a semantic RED, not a
-missing executable or build/environment failure. The current implementation still
-requires its own exact-source remote positive/negative evidence.
+missing executable or build/environment failure.
+
+The implementation's [remote profile job](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40811574832/job/123242861692)
+at commit `8e9dcb8898343fae67e29dce6cffea3683264660`, tree
+`96908e5d47d754979f87e8977239e90782a9f21d`, completed all four positive-interface
+groups in `0.045s` and both rejection groups in `440.919s`, with no skips or
+functional failures. The rejection groups cover five build-admission cases and
+30 invalid-content cases: 35 table subcases, not 35 separate unittest methods.
+This establishes scoped functional GREEN for the developer compile-time seam.
+
+The full job nevertheless failed during `actions/upload-artifact@v7`. The direct
+job log reports that the workspace root was not a parent of
+`D:/gu/profile-rejection-evidence/bad-label.build.log`; the external evidence path
+violated the uploader's root-directory restriction. This was not a profile-test
+failure or a confirmed transient timeout. The log is available, but evidence
+artifact delivery and an exact-final-head successful job remain acceptance gates;
+do not describe the whole run as green or the profile evidence as fully delivered.
+
+The profile builds used only `D:/gu/profile-default` and
+`D:/gu/profile-configured`, and the scope step recorded
+`developer-configuration-probe-only`, `production=false` and
+`productionLibraryConfigured=false`. The independent trust job's log separately
+shows the default `--lib --target-dir D:/gu/p` command without profile features,
+followed by `--features fixture-cli --target-dir D:/gu/f`. Together with the
+default probe's `NOT_CONFIGURED` assertion, this documents build-mode separation;
+it is not a production-artifact digest attestation or production provisioning.
 
 Run only on remote CI with a separately prepared public, ephemeral test profile.
 Never use a production-library/package Cargo target directory for these probes.

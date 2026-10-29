@@ -182,6 +182,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if path == "/service-unavailable-once" and visit == 1:
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/error429":
             self.send_response(429)
             self.send_header("Retry-After", "86400")

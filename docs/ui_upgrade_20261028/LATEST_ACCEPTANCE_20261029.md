@@ -1,6 +1,37 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_FIXTURE_PASS / FULL_PACKAGE_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **VERIFIED_7F76_CLOUD_AND_PACKAGE / NEWER_INTEGRATION_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+
+## 0. 2026-10-29 04:08 UTC 后台核验增量
+
+精确候选`7f76c517f6190241b77d56b60f6df92107204b0d`、tree
+`fde6e63028b07160f53c0c63553b8dbccf98bd9a`的完整Native Windows
+[40809641898](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40809641898)
+三个job均最终SUCCESS。4个bootstrap、175个CTest、upstream65+6及独立10行NativeInstallationTests通过。
+原PS适配器在该run实际输出PASS；其13项独立JSON仍属于3e82的focused run，未改标为本run。
+
+真正的产品上传/下载回读（不是小fixture）PASS：3026文件、1351后端记录、1566对应源码记录、
+28隐藏文件，与staging逐路径/大小/SHA相同。下载到本机后仅做静态复核，两份清单与native-only
+边界也PASS，没有运行其中的程序。旧a539缺文件artifact仍保留FAIL。
+
+| 候选文件 | 实际核对的SHA256 |
+|---|---|
+| 便携artifact ZIP（123721438 bytes） | `67e585db248e4baf98a312b4cd9f7e994b59f9f0d9615dcdd219fc44487bcc43` |
+| 主EXE（9744896 bytes） | `f72567ac4e467f1d4fbce7987445691b5a57e1cb06c144fce7a0908dc099087c` |
+| Setup（113649710 bytes） | `890eb46d8b9f298a694215b64d67da03bc73dd845e39f53b9c67d18df170b470` |
+| 对应源码清单 | `aa1822ce34b89b064f737bd68765dec42e13babee00e8a7a37be6bb638a84dd7` |
+| 本机只读静态核对收据 | `e573efd6c1add9a80f308b221fe8589e3b1a8e48e8f4f886248a89949f241566` |
+
+候选目录`D:/Codex/validation/gsw-ui-upgrade-20261028/full-run40809641898/`内保存payload、Setup和
+`PACKAGE_BINDING_7f76c51.json`。Setup为NotSigned，不捆绑训练环境、不自动打开程序。
+远端test-AppID安装器三语言fresh/reinstall/uninstall/locked-upgrade拒绝/用户数据保留通过；
+各3029文件、0mutation/0watcher error。test-Setup SHA与正式Setup不同，未混称同一安装器。
+本机只读审阅新版中/英/日向导3张代表图，未运行本机安装器。
+
+后续`8e9dcb8`/`a105f53`含独立startup-health/update-engine整合，不能继承以上接受。
+`8e9`的Qtjob在vcpkg下载CMake4.4.3时三次超时，尚未编译产品；原始direct log已保留。
+更新的`a105`/run40811998263已越过该依赖阶段进入完整Test，CodeQL独立运行；不重跑旧任务求绿。
+性能原始FAIL、4项INCONCLUSIVE及未验的界面/硬件边界不变，本机活动版本仍未切换。
 
 这不是发布许可或“全面升级完成”报告。`ACCEPTANCE_STATUS.md/.json` 继续作为旧
 `ffb8eb2` 快照保留；更早的失败、原始结果及本文前版均保存在证据目录和 Git 历史中。
@@ -31,7 +62,7 @@ Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_FIXTURE_
 | 同一 run — CodeQL | `ac5c77b` | 最近交接时仍 **RUNNING**。 | 不能从旧成功推定其已完成。 |
 | [Native Windows 40801832785](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801832785) | `9803c86` | 4个 bootstrap、**175/175 CTests PASS**（2241.71s），upstream SUCCESS；随后 managed publication 步骤 **FAIL**。CodeQL独立记录。 | 已定位为调用缺 `DeveloperPublisher` / `PythonExecutable` 两个新增必填参数，不是175测试失败。主流水线补独立开发工具构建和参数接线，修复后完整产品包回读仍待验。 |
 | [Native Managed Publication 40810209865](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40810209865) | `3e82c54` | **SUCCESS**，4分48秒；原PS适配器13项契约通过，脚本hash未变。 | 只构建启动器、快捷方式夹具和独立发布工具，未构建/启动桌面主程序；formalGswAcceptance=false，不替代真产品包。 |
-| [修复后完整Native Windows 40809641898](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40809641898) | `7f76c51` | 后台运行中；独立工具构建和两个必填参数已接线。 | 实际产品包、安装器、上传/下载字节回读及完整jobs结果仍待导入。 |
+| [修复后完整Native Windows 40809641898](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40809641898) | `7f76c51` | **三个job最终SUCCESS**；实际产品包及上传后回读、安装器行为通过；本机仅静态复核PASS。 | 仅此精确候选；不是后续8e9/a105、全UI/硬件、性能或本机交付的通过。见第0节。 |
 | [历史 Forms 40743097537](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743097537) | `a5393be` | SUCCESS；34/34选定 CTests、16类192格完整。 | 正常尺寸原图后来发现3类真实缺陷；不能以 capture 完整宣称视觉通过。 |
 | [历史完整 Native Windows 40743102181](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743102181) | `a5393be` | 当时3 jobs SUCCESS；直接日志为4 bootstrap、175 CTests、upstream 65+6及 CodeQL 通过。 | 随后便携 artifact 下载回读发现隐藏文件被过滤，不能由 staging 绿灯替代实际分发包。 |
 
@@ -96,8 +127,9 @@ agent 另看初始化及批量训练各一张日文／暗色／窄窗；此处�
 首次 fixture run40800786401的 harness 对预期非零退出处理失败也保留；只修 harness，
 不放宽 validator。
 
-**该 PASS 仅限 fixture。** ac5 完整 Qt job 在 bootstrap 失败，新的完整真实产品包
-upload / download / manifest 回读为 **NOT_RUN**。980 的完整运行仍在进行，未据此接受包。
+**该小fixture的PASS不替代产品。** ac5在bootstrap失败、980随后在发布参数接线失败，
+它们当时均未完成真包门。现已由7f76的真实产品upload/download/manifest回读和本机只读复核
+关闭该包完整性缺口（第0节）；旧artifact仍不改标为PASS。
 
 历史 a539 Setup 曾独立静态核对：113631173 bytes，SHA256
 `47c0b7cf4ba841dc7c71ef37dcbde33eb026f997823091993350318acf46dc3d`，manifest EXE SHA256
@@ -183,9 +215,9 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | PERF-01 | NOT_RUN | 24有效 receipts 和空场景／局部 overlay 子指标保留；阈值未变。 | 原始整体 FAIL、新 checker 同 receipts 复核未接受；中模型4 INCONCLUSIVE。 |
 | PERF-02 | NOT_RUN | 有效空闲／独立 cache 生命周期部分通过；局部 CPU / requested GPU 上限记录存在。 | 实际 driver VRAM／GPU timing、暗色、用户 NVIDIA 等仍未测。 |
 | PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
-| PKG-01 | NOT_RUN | 历史 Setup 静态／向导／远端安装检查通过；隐藏文件 roundtrip fixture PASS。 | 旧 a539 便携实际 FAIL 保留；ac5 新完整真包门未执行，980 新包未完成；fixture 不替代产品。 |
+| PKG-01 | PASS | **7f76候选**真实产品回读、源码/EXE/Setup清单及本机静态边界核验通过，详见第0节；旧a539失败保留。 | 不向更新整合源码继承，不包含本机启动/安装、签名或完整性能接受。 |
 | DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
-| CLOUD-01 | FAIL | 历史a539完整SUCCESS；ac5 Forms／upstream成功；980 bootstrap及175测试成功。 | 980发布测试因新增mandatory参数未接线而失败；修复接线已实现待远端复验；包与CodeQL分开记录，不继承旧绿灯。 |
+| CLOUD-01 | NOT_RUN | **7f76完整三job SUCCESS**；旧ac5/980失败和修复链保留。 | 后续8e9/a105整合源码仍需自己的完整结果；聚合门槛不把已测候选重新标成最新HEAD。 |
 
 ## 8. 早期导航修复与来源边界
 
@@ -217,8 +249,8 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
 接下来必须分别处理：
 
 1. 原失败二进制单次诊断已完成且未复现；保留旧失败和环境限制，不再反复复测求绿。
-2. 复验发布器独立构建与新增参数接线，再取得对应完整CI及实际产品artifact，核对 source / EXE / Setup / manifest /
-   source resources / hidden files / 许可和依赖；不要拿 fixture 或历史包替代。
+2. 7f76发布接线、完整CI和实际产品包核对已完成；继续检查后续startup-health/update-engine整合候选的独立CI与包身份，
+   不把已接受的历史候选改标成最新HEAD，不重新下载已有完整证据。
 3. 完成尚未签收的表面、视觉、无障碍及 provider／硬件／OS支持边界；已通过的16类矩阵
    和3处修复不再写成待导入，也不扩张为全部UI完成。
 4. 旧 performance receipts 的 checker 修复仅做远端复核；中模型噪声仍独立INCONCLUSIVE，
