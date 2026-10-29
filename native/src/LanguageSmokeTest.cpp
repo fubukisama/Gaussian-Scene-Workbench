@@ -1,5 +1,6 @@
 #include "LanguageSmokeTest.h"
 #include "../tests/UiFormVisualProbe.h"
+#include "../tests/UiMenuKeyboardAssertions.h"
 #include "MultiItemList.h"
 #include "ExternalBackupStore.h"
 #include "AppLanguage.h"
@@ -1072,6 +1073,14 @@ bool runLanguageSmokeTest(MainWindow &window) {
   for (int i = 0; i < 3; ++i) {
     check(languageMenu->actions()[i]->data().toString() == AppLanguage::supported()[i], "stable locale identifiers");
     check(languageMenu->actions()[i]->text() == AppLanguage::displayName(AppLanguage::supported()[i]), "autonyms");
+  }
+  if (qEnvironmentVariable("GSW_UI_MENU_KEYBOARD_ACCEPTANCE") == QStringLiteral("1")) {
+    // Dedicated remote CTests only. Preserve the original language matrix and
+    // its fixtures/deadlines; the adapter refuses non-isolated/native contexts.
+    if (!passed) return false;
+    return tests::runOwnedMenuKeyboardAcceptance(window, [&] {
+      return tests::menuKeyboardPublicSnapshot(window);
+    });
   }
   const QString name = QStringLiteral("古墳 / 日本語:*?\"<>|📷 ");
   QTemporaryDir trainingImages;

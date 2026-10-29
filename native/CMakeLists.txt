@@ -1097,6 +1097,13 @@ if(BUILD_TESTING)
   endforeach()
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   if(WIN32 AND GSW_UI_FORM_CAPTURE_TESTS)
+    foreach(language zh_CN en_US ja_JP)
+      add_test(NAME native_menu_keyboard_${language}
+        COMMAND GaussianSceneWorkbench --smoke-test-language --language ${language})
+      set_tests_properties(native_menu_keyboard_${language} PROPERTIES TIMEOUT 30
+        ENVIRONMENT "QT_OPENGL=${GSW_TEST_OPENGL_BACKEND};QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=;GSW_UI_MENU_KEYBOARD_ACCEPTANCE=1;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT}"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    endforeach()
     add_test(NAME native_language_form_matrix
       COMMAND GaussianSceneWorkbench --smoke-test-language-form-matrix)
     set_tests_properties(native_language_form_matrix PROPERTIES TIMEOUT 120

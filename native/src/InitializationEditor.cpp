@@ -64,7 +64,11 @@ InitializationEditor::InitializationEditor(const bool allowPreserve, QWidget *pa
   auto *layout = new QVBoxLayout(this); layout->setContentsMargins(0, 0, 0, 0);
   auto *form = new QFormLayout; form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
   form->setRowWrapPolicy(QFormLayout::WrapLongRows); layout->addLayout(form);
-  const auto row = [&](const char *caption, QWidget *widget) { form->addRow(AppLanguage::text(new QLabel(this), caption), widget); };
+  const auto row = [&](const char *caption, QWidget *widget) {
+    auto *label = AppLanguage::text(new QLabel(this), caption);
+    label->setBuddy(widget);
+    form->addRow(label, widget);
+  };
   m->kind = new QComboBox(this); m->kind->setObjectName(QStringLiteral("initializationKind"));
   const auto addKind = [&](const QString &id, const char *caption) {
     m->kind->addItem(QString(), QVariant(id)); AppLanguage::bindComboItem(m->kind, m->kind->count() - 1, caption);

@@ -42,7 +42,12 @@ jobs:
           $root=Join-Path $env:RUNNER_TEMP 'gsw-ui-surfaces'
           if(Test-Path -LiteralPath $root){throw 'Evidence root must be fresh; never overwrite a prior run.'}
           New-Item -ItemType Directory -Path $root | Out-Null
+          $temporary=Join-Path $root 'temp'
+          New-Item -ItemType Directory -Path $temporary | Out-Null
           "GSW_UI_SURFACE_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TEMP=$temporary" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$temporary" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PIP_CACHE_DIR=$(Join-Path $env:RUNNER_TEMP 'gsw-ui-pip-cache')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           $head=(git rev-parse HEAD).Trim()
           if($head -cne $env:GITHUB_SHA){throw 'Unexpected source commit.'}
           [ordered]@{schema='gsw.ui_surface_run/1';sourceCommit=$head;sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
@@ -50,11 +55,21 @@ jobs:
             status='NOT_RUN';batches=@();recordedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6|
             Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
       - uses: actions/setup-python@v6
-        id: qa
+        id: qa-bootstrap
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Create isolated QA Python on the evidence drive
+        id: qa
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $environment=Join-Path (Split-Path $env:GSW_UI_SURFACE_ROOT -Parent) 'gsw-ui-surfaces-qa-python'
+          if(Test-Path -LiteralPath $environment){throw 'A fresh owned QA environment is required.'}
+          & '${{ steps.qa-bootstrap.outputs.python-path }}' -m venv $environment
+          if($LASTEXITCODE -ne 0){throw 'Owned-drive QA environment creation failed.'}
+          "python-path=$(Join-Path $environment 'Scripts/python.exe')" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Validate native boundaries, translations and evidence checker contracts
         shell: pwsh
         run: |
@@ -75,6 +90,7 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
       - name: Build only the selected real-window and style targets
+        id: surface-build
         shell: pwsh
         env:
           UI_SURFACE_SCOPE: ${{ inputs.scope }}
@@ -175,6 +191,51 @@ jobs:
           }
           $manifest['status']='FINISHED'
           $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+      - name: Verify dedicated menu keyboard and accessibility paths
+        if: ${{ !cancelled() && inputs.scope == 'forms' && steps.surface-build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$false
+          if($env:GITHUB_ACTIONS -cne 'true'){throw 'Menu UI execution is remote-only.'}
+          $root=$env:GSW_UI_SURFACE_ROOT
+          $case=Join-Path $root 'menu-keyboard'
+          New-Item -ItemType Directory -Path $case -ErrorAction Stop | Out-Null
+          $env:PATH="$env:QT_ROOT_DIR/bin;$env:PATH"
+          $env:QT_PLUGIN_PATH="$env:QT_ROOT_DIR/plugins"
+          $env:QT_QPA_PLATFORM='windows'
+          $env:QT_OPENGL='software'
+          $env:QT_SCALE_FACTOR='1'
+          $env:GSW_UI_SOURCE_COMMIT=$env:GITHUB_SHA
+          # Three new isolated processes, not extra work/deadlines in the
+          # original requested form/icon contract or its planned batch manifest.
+          ctest --test-dir native/build-ui-surfaces -C Release --parallel 1 --no-tests=error `
+            --output-on-failure --verbose --output-junit "$case/ctest.xml" --output-log "$case/ctest.log" `
+            -R '^native_menu_keyboard_(zh_CN|en_US|ja_JP)$'
+          $menuExit=$LASTEXITCODE
+          $files=@(Get-ChildItem -LiteralPath $root -Filter 'menu-keyboard-results.json' -Recurse -File)
+          $receipts=@($files|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
+          $original=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json
+          $originalCount=($original.plannedBatches|ForEach-Object {$_.tests.Count}|Measure-Object -Sum).Sum
+          [ordered]@{schema='gsw.menu_keyboard_run/1';sourceCommit=$env:GITHUB_SHA;
+            originalFormIconTests=$originalCount;additionalMenuTests=3;ctestExit=$menuExit;receiptCount=$files.Count;
+            fullAcceptance=$false;applicationExecutedLocally=$false;
+            receipts=@($files|ForEach-Object {@{path=[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/');
+              sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()}})} |
+            ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$case/run.json" -Encoding utf8
+          if($menuExit -ne 0){throw 'One or more real menu keyboard paths were not accepted; preserve FAIL/NOT_RUN receipts.'}
+          if($receipts.Count -ne 3 -or (@($receipts.locale|Sort-Object -Unique) -join ',') -cne 'en_US,ja_JP,zh_CN'){
+            throw 'Three distinct locale menu receipts are required.'
+          }
+          foreach($receipt in $receipts){
+            if($receipt.sourceCommit -cne $env:GITHUB_SHA -or $receipt.status -cne 'PASS' -or
+              $receipt.expectedCaseCount -ne 4 -or $receipt.cases.Count -ne 4 -or
+              $receipt.publicStateUnchanged -ne $true -or $receipt.fullAcceptance -ne $false -or
+              @($receipt.cases|Where-Object {$_.status -cne 'PASS'}).Count -ne 0){
+              throw 'A menu path/source/state boundary is incomplete; do not convert it into full UI acceptance.'
+            }
+          }
+          exit 0
       - name: Index only test-owned PNG bytes and assess actual evidence coverage
         if: always()
         shell: pwsh

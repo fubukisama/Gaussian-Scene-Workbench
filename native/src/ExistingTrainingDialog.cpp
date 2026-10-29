@@ -269,7 +269,17 @@ void ExistingTrainingDialog::refreshPresentation(){
     m->details->setPlainText(json(m->report));refreshEnabled();return;
   }
   const QSignalBlocker blocker(m->job);
-  for(int i=0;i<m->jobs.size()&&i<m->job->count();++i){const auto row=m->jobs[i].toObject();const QString name=row.value("outputName").toString(row.value("jobId").toString());
+  for(int i=0;i<m->jobs.size()&&i<m->job->count();++i){auto row=m->jobs[i].toObject();
+    const QString id=row.value("jobId").toString();
+    // The list is an earlier snapshot. An accepted observation of this exact
+    // attached job is authoritative for its current presentation, not a reason
+    // to refresh the worker, change selection, or mutate the stored job.
+    if(m->connected&&!m->failedObservation&&id==m->attachedId&&
+        m->report.value("jobId").toString()==id){
+      row.insert(QStringLiteral("recordedState"),m->report.value("recordedState"));
+      row.insert(QStringLiteral("liveness"),m->report.value("liveness"));
+    }
+    const QString name=row.value("outputName").toString(row.value("jobId").toString());
     const QString caption=QStringLiteral("%1 | %2 | %3 | %4").arg(name,row.value("jobId").toString(),stateLabel(row.value("recordedState").toString()),liveLabel(row.value("liveness").toString()));m->job->setItemText(i,caption);m->job->setItemData(i,caption,Qt::ToolTipRole);}
   if(m->message){auto message=text(m->message);if(message.contains(QStringLiteral("%1")))message=message.arg(m->errorDetail);m->state->setText(message);}
   else if(!m->connected)m->state->setText(text(AppLanguage::source("未连接；刷新清单后明确选择已有作业。")));
