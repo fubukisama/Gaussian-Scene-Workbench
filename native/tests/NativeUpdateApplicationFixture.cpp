@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPainter>
 #include <QSaveFile>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -19,6 +20,21 @@
 #endif
 
 namespace {
+class StartupSurface final : public QWidget {
+public:
+  explicit StartupSurface(QWidget *parent) : QWidget(parent) { setMinimumSize(320, 70); }
+  [[nodiscard]] bool painted() const { return mPainted; }
+protected:
+  void paintEvent(QPaintEvent *) override {
+    QPainter painter(this);
+    painter.fillRect(rect(), QColor(34, 42, 52));
+    painter.setPen(QColor(100, 180, 210));
+    painter.drawRect(rect().adjusted(8, 8, -9, -9));
+    mPainted = true;
+  }
+private:
+  bool mPainted = false;
+};
 bool marker(const QString &path, const QJsonObject &record) {
   QSaveFile file(path);
   file.setDirectWriteFallback(false);
@@ -39,6 +55,8 @@ int main(int argc, char **argv) {
   // Test-only explanatory text; no production UI/catalog is being exercised.
   layout->addWidget(new QLabel(QString::fromUtf8(
       "隔离更新测试程序 / Isolated update fixture / 隔離更新テスト\n") + label, &window));
+  auto *surface = new StartupSurface(&window);
+  layout->addWidget(surface);
   window.resize(480, 140);
   bool shown = false;
   QJsonObject record{{"schema", "gsw.update_application_fixture/1"}, {"testOnly", true},
@@ -55,8 +73,10 @@ int main(int argc, char **argv) {
   QTimer::singleShot(100, &app, [&] {
     shown = window.isVisible() && window.windowHandle();
     record.insert(QString::fromLatin1("windowShown"), shown);
+    record.insert(QString::fromLatin1("viewportPainted"), surface->painted());
+    record.insert(QString::fromLatin1("healthScope"), QString::fromLatin1("qt-fixture-window-surface"));
     record.insert(QString::fromLatin1("phase"), QString::fromLatin1("shown"));
-    if (!marker(path, record)) app.exit(4);
+    if (!shown || !surface->painted() || !marker(path, record)) app.exit(4);
     else QTimer::singleShot(150, &app, &QCoreApplication::quit);
   });
   const int result = app.exec();

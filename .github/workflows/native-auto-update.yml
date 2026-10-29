@@ -15,6 +15,16 @@ on:
       - 'native/third_party/nlohmann/**'
       - 'native/src/NativeUpdate*'
       - 'native/src/NativeActivation*'
+      - 'native/src/NativeStartup*'
+      - 'native/src/NativeRecovery*'
+      - 'native/src/NativeInstallation*'
+      - 'native/src/NativeLauncher.cpp'
+      - 'native/src/main.cpp'
+      - 'native/src/MainWindow.*'
+      - 'native/src/NativeViewport.*'
+      - 'native/src/AppLanguage.*'
+      - 'native/CMakeLists.txt'
+      - 'native/i18n/catalog.json'
       - 'native/tests/NativeUpdate*'
       - 'packaging/updates/**'
       - 'scripts/*native_update*'
@@ -36,6 +46,88 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/native/build-auto-update/rust
 
 jobs:
+  isolated-profile-configuration:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    env:
+      CARGO_HOME: D:/gu/c
+      RUSTUP_HOME: D:/gu/r
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+          check-latest: true
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/c
+            D:/gu/r
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Prepare public test data only for distinct configuration probes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-profile,native/profile-evidence -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-profile" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-profile" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-profile"
+          if($LASTEXITCODE -ne 0){throw 'Profile QA environment failed.'}
+          & "$PWD/native/.qa-profile/Scripts/python.exe" -m pip install -r packaging/updates/fixture-requirements.txt
+          if($LASTEXITCODE -ne 0){throw 'Profile fixture dependencies failed.'}
+          & "$PWD/native/.qa-profile/Scripts/python.exe" -I -B scripts/prepare_native_update_trust_ci.py `
+            --root "$PWD/native/.profile-fixture" --source-commit (git rev-parse HEAD).Trim() `
+            --source-tree (git rev-parse 'HEAD^{tree}').Trim()
+          if($LASTEXITCODE -ne 0){throw 'Ephemeral public-root fixture failed.'}
+          $prepared=Get-Content native/.profile-fixture/preparation.json -Raw | ConvertFrom-Json
+          $env:GSW_PROFILE_SOURCE=$prepared.profile
+          $env:GSW_PROFILE_OUTPUT="$PWD/native/.profile-fixture/native-profile.json"
+          & "$PWD/native/.qa-profile/Scripts/python.exe" -I -B -c "import json,os,pathlib; p=json.loads(pathlib.Path(os.environ['GSW_PROFILE_SOURCE']).read_text(encoding='utf-8')); p['product']='Fubukisama.GaussianSceneWorkbench.Native'; p['approvedHosts']=['updates.example.invalid']; p.pop('fixtureCaPem',None); p['channels']={c:{'metadataBase':'https://updates.example.invalid/'+c+'/metadata/','targetsBase':'https://updates.example.invalid/'+c+'/targets/'} for c in ('stable','preview')}; pathlib.Path(os.environ['GSW_PROFILE_OUTPUT']).write_text(json.dumps(p),encoding='utf-8')"
+          if($LASTEXITCODE -ne 0){throw 'Public configuration probe data failed.'}
+          "GSW_UPDATER_PRODUCTION_PROFILE_PATH=$env:GSW_PROFILE_OUTPUT" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build default and configured developer probes in separate targets
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'Profile pinned Rust unavailable.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release `
+            --bin gsw-trust-profile-probe --features profile-probe --target-dir D:/gu/profile-default
+          if($LASTEXITCODE -ne 0){throw 'Default profile probe build failed.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release `
+            --bin gsw-trust-profile-probe --features profile-probe,production-profile --target-dir D:/gu/profile-configured
+          if($LASTEXITCODE -ne 0){throw 'Configured developer probe build failed.'}
+      - name: Exercise compile-time profile boundary without network or adoption
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-profile/Scripts/python.exe" -I -B native/updater-trust/tests/remote_profile_contract.py `
+            --default-probe D:/gu/profile-default/release/gsw-trust-profile-probe.exe `
+            --configured-probe D:/gu/profile-configured/release/gsw-trust-profile-probe.exe 2>&1 | Tee-Object native/profile-evidence/contracts.log
+          if($LASTEXITCODE -ne 0){throw 'Compiled-profile public boundary failed.'}
+      - name: Record probe-only scope and stop the owned setup server
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/profile-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='developer-configuration-probe-only';
+            production=false;productionLibraryConfigured=false;sourceCommit=(git rev-parse HEAD).Trim();
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/profile-evidence/source.json
+          if(Test-Path native/.profile-fixture/preparation.json){
+            $prepared=Get-Content native/.profile-fixture/preparation.json -Raw | ConvertFrom-Json
+            $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($prepared.serverPid)" -ErrorAction SilentlyContinue
+            if($process.CommandLine -and $process.CommandLine.Contains('native_update_network_fixture.py') -and
+                $process.CommandLine.Contains($prepared.root)){
+              Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue
+            }
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-profile-evidence
+          path: native/profile-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   isolated-source-closure:
     runs-on: windows-2022
     timeout-minutes: 30

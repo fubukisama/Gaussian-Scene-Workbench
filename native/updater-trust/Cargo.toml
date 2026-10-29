@@ -15,10 +15,17 @@ name = "gsw-trust-fixture-cli"
 path = "src/bin/fixture_cli.rs"
 required-features = ["fixture-cli"]
 
+[[bin]]
+name = "gsw-trust-profile-probe"
+path = "src/bin/profile_probe.rs"
+required-features = ["profile-probe"]
+
 [features]
 default = []
 fixture-profile = ["tough/gsw-fixture-store-faults"]
 fixture-cli = ["fixture-profile"]
+production-profile = []
+profile-probe = []
 
 [dependencies]
 tough = { path = "../third_party/tough", version = "=0.24.0", default-features = false }
