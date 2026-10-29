@@ -7,11 +7,11 @@
 <h1 align="center" lang="en">Gaussian Splatting Workbench</h1>
 
 <p align="center">
-  <strong>从照片到高斯场景：在一个原生工作台里完成重建、训练与编辑。</strong>
+  <strong>从照片与已知相机，到可编辑的高斯场景。</strong>
 </p>
 
 <p align="center">
-  <a href="README_RELEASE.md#下载预览版" title="获取原生预览版"><img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="原生预览版 0.3.8"></a>
+  <a href="README_RELEASE.md#下载预览版" title="获取原生预览版"><img src="https://img.shields.io/badge/native_preview-development-2563eb?style=flat-square" alt="原生预览版开发通道"></a>
   <a href="README_RELEASE.md#使用前确认" title="Windows 平台与运行环境要求"><img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64"></a>
   <a href="native/LICENSE.md"><img src="https://img.shields.io/badge/desktop_license-GPL--3.0--or--later-16a34a?style=flat-square" alt="原创原生主程序：GPL-3.0-or-later"></a>
 </p>
@@ -29,36 +29,85 @@
 
 ---
 
-<strong lang="en">Gaussian Splatting Workbench (GSW)</strong> 把高斯泼溅、摄影测量、点云和网格工作流放进 Qt / C++ 原生桌面。可以从照片、视频、已知相机开始，也可以直接打开已有模型。
+<strong><span lang="en">Gaussian Splatting Workbench (GSW)</span></strong> 在 Windows 原生桌面中连接摄影测量、3DGS / 2DGS 训练、多模型编辑与可追溯导出。可以从照片或视频开始，保留外部求解的相机，也可以直接打开已有模型。
 
-## 一个工作台，六项核心能力
+[为什么选择 GSW](#为什么选择-gsw) · [选择你的起点](#选择你的起点) · [功能一览](#功能一览) · [开始使用](#开始使用) · [文档](#文档)
 
-| 重建与训练 | 查看与交付 |
-| --- | --- |
-| **重建场景**<br>导入照片或视频、关联数据集，并运行 COLMAP。 | **查看模型**<br>统一显示高斯、2DGS surfel、点云和纹理网格。 |
-| **管理训练**<br>运行 3DGS / 2DGS 实验，查看进度，安全暂停并从兼容的完整状态续训。 | **编辑场景**<br>选择、变换和裁剪受支持模型，保留撤销与原始文件。 |
-| **追溯坐标**<br>保留锁定相机、单位、尺度约束和训练／检核数据划分。 | **提取与评价**<br>导出 PLY / SPZ、使用可选网格管线，并与独立参考数据比较几何。 |
+## 原生视口
 
-## 三步开始
+![原生视口显示独立的高斯、网格与点云测试图层](docs/images/native-viewport-fixture.png)
 
-1. **安装预览版。** 按[下载指南](README_RELEASE.md#简体中文)获取可用安装器，并确认所需环境。
-2. **加入场景。** 添加照片／视频、关联数据集，或导入已有 PLY / SPZ 模型。
-3. **选择工作流。** 训练、查看、编辑或导出。[查找对应指南 →](docs/README.md)
+<sub>来自合成混合模型回归场景的实际视口截图（2026-10-27）。这是较早的画面，仅展示图层显示，不代表当前 UI 验收或重建质量。[图片来源](docs/images/README.md)。</sub>
 
-> **当前为预览版，不捆绑完整训练环境。** 重建和 CUDA 训练需要兼容的外部运行库。完整状态续训仅适用于兼容的原生 3DGS / 2DGS 检查点；渲染深度成果是外观代理，不代表真实材料边界或模型精度认证。
+## 为什么选择 GSW
 
-<details>
-<summary><strong>查看原生视口</strong></summary>
+### 把整个实验连接起来
 
-![原生视口同时显示四个独立加载的合成图层](docs/images/native-viewport-fixture.png)
+在一个工程中关联数据集、重建、训练任务和成果。查看进度，安全暂停兼容的训练，比较不同实验而不覆盖旧模型。持久批量任务可独立于观察窗口继续运行。
 
-来自独立合成回归场景的实际原生视口截图，仅展示混合模型显示，不是重建质量样例。[图片来源](docs/images/README.md)。
+### 相机与尺度有据可查
 
-</details>
+导入已知相机的完整内参、位姿和数据划分；锁定相机流程不会静默重跑 SfM。保留初始化、坐标变换、尺度约束与独立检核记录；未知单位仍保持未知。
 
-## 进一步了解
+### 保留原件，查看与编辑新结果
 
-[训练与续训](docs/TRAINING_RESUME.md) · [已知相机与尺度](docs/CAMERA_SCALE_P0.md) · [几何与独立评价](docs/GENERAL_RECONSTRUCTION.md) · [支持的管线](docs/GENERATION_PIPELINES.md) · [显示与导航](docs/VIEWPORT_DISPLAY.md)
+在同一视口中处理高斯模型、2DGS surfel、点云和网格。选择对象或受支持的点集，进行可撤销的变换与裁剪，再另存导出结果。视口编辑不会重写源文件或训练检查点。
+
+## 适合谁
+
+- **重建研究者：**一起记录输入、实际生效的设置、相机策略与评价来源。
+- **场景编辑者：**查看多个成果，调整受支持模型，准备符合目标格式要求的导出。
+- **已知相机工作流：**使用标定、合成或外部重建的相机数据，不把每种输入都重新当作 SfM 问题处理。
+
+GSW 面向通用场景：小物体、室内和建筑是不同的应用流程，不是写死的实验模板。
+
+## 选择你的起点
+
+### 照片或视频
+
+添加媒体或关联数据集，通过 COLMAP 重建相机，再训练 3DGS 或 2DGS。从稀疏重建、初始化到训练预览和最终结果，按阶段查看进度。[导入与重建](docs/WORKSPACE_DROP.md) · [训练与完整状态续训](docs/TRAINING_RESUME.md)
+
+### 已知相机
+
+检查相机约定、单位和训练／验证／测试划分，在训练前选择并查看初始化。通过受支持的导出保留锁定相机与已记录的变换链。[相机与初始化](docs/CAMERA_SCALE_P0.md) · [已知距离、基线与控制点](docs/CAMERA_SCALE_P1.md)
+
+### 已有模型
+
+导入受支持的 PLY / SPZ 文件，比较独立图层，调整可见性和变换，无须重新训练即可导出。[多模型工作流](docs/MULTI_SCENE_IMPORT.md) · [坐标与单位](docs/SCENE_COORDINATES.md)
+
+## 功能一览
+
+| 工作流 | GSW 提供的能力 | 使用前确认 |
+| --- | --- | --- |
+| 查看与编辑 | 高斯／2DGS、点云和网格图层；选择、变换、裁剪与撤销 | 源属性支持情况，以及各格式的编辑／导出限制 |
+| 重建 | 照片／视频导入、数据集关联和 COLMAP 任务 | 兼容的外部 COLMAP 与运行环境 |
+| 训练与续训 | 原生 3DGS / 2DGS 任务、进度、安全暂停和兼容的完整状态续训 | 后端与输入身份匹配；PLY 热启动不等于完整状态续训 |
+| 几何提取 | 渲染深度点云，以及可选的 TSDF、SuGaR / GS2Mesh 路线 | 各方法的相机、深度、运行环境和尺度要求；并非所有路线都支持所有输入 |
+| 测量与比较 | 配对图像的 PSNR / SSIM 与独立几何报告，含后台／CLI 工具 | 有效参考数据、配准、单位、数据划分与可比较的测量设置 |
+
+高斯模型可通过 PLY / SPZ 交付。点云与网格导出有各自的格式和属性规则；支持一种格式，不等于每种模型表示都具有相同支持。[完整管线矩阵](docs/GENERATION_PIPELINES.md) · [几何路线与限制](docs/MESH_GENERATION.md) · [高斯导出保真](docs/GAUSSIAN_PLY_BAKING.md)
+
+## 开始使用
+
+1. **获取已验证的 Windows x64 预览版。** 按[下载与安装指南](README_RELEASE.md#简体中文)操作，或[从源码构建原生程序](native/README.md)。源码 ZIP 不是安装器。
+2. **选择查看或计算。** 打开受支持的已有模型不需要训练环境；重建与训练使用单独配置的运行环境。CUDA 训练需要兼容的 NVIDIA 硬件和后端依赖。[运行环境配置](docs/WINDOWS_NATIVE_RUNTIME.md)
+3. **先从小工程开始。** 导入模型、添加媒体，或验证已知相机数据集。长时间运行前，确认实际生效的设置与输出位置。
+
+原生界面支持**简体中文、英语和日语**，切换语言即时生效。内存与显存需求取决于图像分辨率、模型大小和所选方法，不提供统一的显存或质量保证。
+
+> **预览版边界：**兼容的完整状态续训仅适用于原生 3DGS / 2DGS 后端。渲染深度几何是外观代理，不是经过认证的材料边界。任务完成、较低的拟合残差或正常预览，都不能证明独立几何精度。
+
+## 文档
+
+- **训练与实验：**[暂停／续训](docs/TRAINING_RESUME.md) · [运行控制](docs/RUNTIME_DECOUPLING.md) · [质量测量](docs/TRAINING_QUALITY.md) · [持久批量任务](docs/RECORDED_PLY_AND_BATCH.md)
+- **相机与几何：**[已知相机](docs/CAMERA_SCALE_P0.md) · [尺度约束](docs/CAMERA_SCALE_P1.md) · [初始化、深度与评价](docs/GENERAL_RECONSTRUCTION.md)
+- **桌面与交付：**[显示／导航](docs/VIEWPORT_DISPLAY.md) · [大模型预算](docs/RESOURCE_BUDGETS.md) · [更新／回退](docs/NATIVE_UPDATES.md) · [源码构建](native/README.md)
+
+[浏览全部指南 →](docs/README.md)
+
+## 反馈与开发
+
+反馈可复现的问题时，请附上版本、相关设置，以及尽可能小的非私密样例。不要在公开 Issue 中上传私人照片、检查点或凭据。[问题追踪](https://github.com/fubukisama/Gaussian-Scene-Workbench/issues) · [原生 CI 与诊断](docs/NATIVE_CI.md)
 
 ## 许可
 

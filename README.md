@@ -7,11 +7,11 @@
 <h1 align="center" lang="en">Gaussian Splatting Workbench</h1>
 
 <p align="center">
-  <strong>Reconstruct, train and edit Gaussian scenes in one native workspace.</strong>
+  <strong>From photos and known cameras to editable Gaussian scenes.</strong>
 </p>
 
 <p align="center">
-  <a href="README_RELEASE.md#download-the-preview" title="Get the native preview"><img src="https://img.shields.io/badge/native_preview-0.3.8-2563eb?style=flat-square" alt="Native preview 0.3.8"></a>
+  <a href="README_RELEASE.md#download-the-preview" title="Get the native preview"><img src="https://img.shields.io/badge/native_preview-development-2563eb?style=flat-square" alt="Native preview development channel"></a>
   <a href="README_RELEASE.md#before-you-start" title="Windows platform and runtime requirements"><img src="https://img.shields.io/badge/platform-Windows_x64-334155?style=flat-square" alt="Windows x64"></a>
   <a href="native/LICENSE.md"><img src="https://img.shields.io/badge/desktop_license-GPL--3.0--or--later-16a34a?style=flat-square" alt="Original native desktop: GPL-3.0-or-later"></a>
 </p>
@@ -29,36 +29,85 @@
 
 ---
 
-GSW brings **Gaussian Splatting, photogrammetry, point clouds and meshes** into a Qt / C++ desktop application. Start with photos, video or known cameras—or open a model you already have.
+**Gaussian Splatting Workbench (GSW)** connects photogrammetry, 3DGS / 2DGS training, multi-model editing and traceable export in a native Windows application. Start with photos or video, preserve an external camera solution, or bring in a model you already have.
 
-## One workspace, six essentials
+[Why GSW](#why-gsw) · [Choose your starting point](#choose-your-starting-point) · [Capabilities](#capabilities) · [Get started](#get-started) · [Documentation](#documentation)
 
-| Build and train | Inspect and deliver |
-| --- | --- |
-| **Reconstruct**<br>Import photos or video, link datasets and run COLMAP. | **Explore**<br>View Gaussians, 2DGS surfels, point clouds and textured meshes. |
-| **Train**<br>Run 3DGS / 2DGS experiments with progress, safe pause and compatible full-state resume. | **Edit**<br>Select, transform and crop supported models, with undo and original-file protection. |
-| **Keep coordinates traceable**<br>Preserve locked cameras, units, scale constraints and data splits. | **Extract and evaluate**<br>Export PLY / SPZ, use optional mesh routes and compare geometry against independent references. |
+## In the viewport
 
-## Start in three steps
+![Native viewport showing independent Gaussian, mesh and point-cloud test layers](docs/images/native-viewport-fixture.png)
 
-1. **Install the preview.** Follow the [download guide](README_RELEASE.md) for the available installer and its prerequisites.
-2. **Bring in a scene.** Add photos / video, link a dataset, or import an existing PLY / SPZ model.
-3. **Choose your workflow.** Train, inspect, edit or export. [Find the right guide →](docs/README.md)
+<sub>Actual viewport capture from a synthetic mixed-model regression scene (2026-10-27). This older snapshot demonstrates layer display, not current UI acceptance or reconstruction quality. [Image provenance](docs/images/README.md).</sub>
 
-> **Preview, not a bundled training environment.** Reconstruction and CUDA training need compatible external runtimes. Full-state resume is limited to compatible native 3DGS / 2DGS checkpoints. Rendered depth products are appearance proxies, not certified physical surfaces or accuracy measurements.
+## Why GSW
 
-<details>
-<summary><strong>See the native viewport</strong></summary>
+### Keep the whole experiment connected
 
-![Native viewport displaying four independently loaded synthetic layers](docs/images/native-viewport-fixture.png)
+Associate datasets, reconstruction, training jobs and results in one project. Monitor progress, pause compatible training safely, and compare experiments without replacing earlier models. Persistent batch tasks can continue independently of their observation window.
 
-Actual native viewport capture from an independent synthetic regression scene. It illustrates mixed-model display, not reconstruction quality. [Image provenance](docs/images/README.md).
+### Treat cameras and scale as data, not assumptions
 
-</details>
+Import known cameras with their full intrinsics, poses and data splits. The locked-camera route does not silently rerun SfM. Keep initialization, coordinate transforms, scale constraints and independent checks traceable; unknown units stay unknown.
 
-## Go deeper
+### Inspect and edit alongside the original
 
-[Training & resume](docs/TRAINING_RESUME.md) · [Known cameras & scale](docs/CAMERA_SCALE_P0.md) · [Geometry & evaluation](docs/GENERAL_RECONSTRUCTION.md) · [Supported pipelines](docs/GENERATION_PIPELINES.md) · [Display & navigation](docs/VIEWPORT_DISPLAY.md)
+Work with Gaussian models, 2DGS surfels, point clouds and meshes in one viewport. Select objects or supported point subsets, transform and crop with undo, then export a separate result. Existing source files and training checkpoints are not rewritten by viewport edits.
+
+## Who it is for
+
+- **Reconstruction researchers:** keep inputs, effective settings, camera policy and evaluation provenance together.
+- **Scene editors:** inspect multiple results, adjust supported models and prepare format-specific exports.
+- **Known-camera workflows:** bring calibrated, synthetic or externally reconstructed camera data without treating every input as a new SfM problem.
+
+GSW is general-purpose: small objects, rooms and buildings are workflows, not hardcoded experiment templates.
+
+## Choose your starting point
+
+### Photos or video
+
+Add media or link a dataset, reconstruct cameras with COLMAP, then train 3DGS or 2DGS. Follow the stages from sparse reconstruction and initialization to training preview and final output. [Import & reconstruction](docs/WORKSPACE_DROP.md) · [Training & full-state resume](docs/TRAINING_RESUME.md)
+
+### Known cameras
+
+Validate camera conventions, units and train / validation / test splits; choose and inspect initialization before training. Preserve the locked solution and recorded transform chain through supported exports. [Cameras & initialization](docs/CAMERA_SCALE_P0.md) · [Distance, baseline & control points](docs/CAMERA_SCALE_P1.md)
+
+### Existing models
+
+Import supported PLY / SPZ files, compare independent layers, adjust visibility and transforms, and export without rerunning training. [Multiple models](docs/MULTI_SCENE_IMPORT.md) · [Coordinates & units](docs/SCENE_COORDINATES.md)
+
+## Capabilities
+
+| Workflow | Available in GSW | What to check |
+| --- | --- | --- |
+| View and edit | Gaussian / 2DGS, point-cloud and mesh layers; selection, transforms, crop and undo | Supported source attributes and format-specific edit/export limits |
+| Reconstruct | Photo / video import, dataset linking and COLMAP jobs | A compatible external COLMAP/runtime installation |
+| Train and resume | Native 3DGS / 2DGS jobs, progress, safe pause and compatible complete-state resume | Matching backend and input identity; a PLY warm start is not full-state resume |
+| Extract geometry | Rendered-depth point clouds and optional TSDF, SuGaR / GS2Mesh routes | Method-specific cameras, depth, runtime and scale requirements; not every route supports every input |
+| Measure and compare | Paired-image PSNR / SSIM and independent geometry reports, including background / CLI tools | Valid reference data, alignment, units, splits and comparable measurement settings |
+
+Gaussian delivery includes PLY / SPZ. Point-cloud and mesh exports have their own format and attribute rules; one supported format does not imply identical support for every representation. [Full pipeline matrix](docs/GENERATION_PIPELINES.md) · [Geometry routes & limits](docs/MESH_GENERATION.md) · [Gaussian export fidelity](docs/GAUSSIAN_PLY_BAKING.md)
+
+## Get started
+
+1. **Get a verified Windows x64 preview.** Use the [download & installation guide](README_RELEASE.md), or [build the native application](native/README.md). A source ZIP is not an installer.
+2. **Choose viewing or compute.** Opening supported existing models does not require a training environment. Reconstruction and training use separately configured runtimes; CUDA training requires compatible NVIDIA hardware and backend dependencies. [Runtime setup](docs/WINDOWS_NATIVE_RUNTIME.md)
+3. **Start with a small project.** Import a model, add media, or validate a known-camera dataset. Check the effective settings and output location before a long run.
+
+The native interface supports **English, Simplified Chinese and Japanese**, with immediate language switching. Memory and GPU requirements depend on image resolution, model size and the selected method; there is no universal VRAM or quality guarantee.
+
+> **Preview scope:** compatible full-state resume is specific to the native 3DGS / 2DGS backends. Rendered-depth geometry is an appearance proxy, not a certified material boundary. A completed task, low fitting residual or successful preview does not establish independent geometric accuracy.
+
+## Documentation
+
+- **Training & experiments:** [Pause / resume](docs/TRAINING_RESUME.md) · [Runtime controls](docs/RUNTIME_DECOUPLING.md) · [Quality measurement](docs/TRAINING_QUALITY.md) · [Persistent batches](docs/RECORDED_PLY_AND_BATCH.md)
+- **Cameras & geometry:** [Known cameras](docs/CAMERA_SCALE_P0.md) · [Scale constraints](docs/CAMERA_SCALE_P1.md) · [Initialization, depth & evaluation](docs/GENERAL_RECONSTRUCTION.md)
+- **Desktop & delivery:** [Display / navigation](docs/VIEWPORT_DISPLAY.md) · [Large-model budgets](docs/RESOURCE_BUDGETS.md) · [Updates / rollback](docs/NATIVE_UPDATES.md) · [Build from source](native/README.md)
+
+[Browse all guides →](docs/README.md)
+
+## Feedback and development
+
+Report a reproducible issue with the version, relevant settings and a small non-private example where possible. Do not post private photographs, checkpoints or credentials in public issues. [Issue tracker](https://github.com/fubukisama/Gaussian-Scene-Workbench/issues) · [Native CI and diagnostics](docs/NATIVE_CI.md)
 
 ## License
 

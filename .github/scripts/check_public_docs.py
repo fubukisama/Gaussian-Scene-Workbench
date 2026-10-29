@@ -39,13 +39,19 @@ class Html(HTMLParser):
         self.languages = set()
         self.anchor_stack = []
         self.linked_images = []
+        self.ids = set()
+        self.unfolded_showcase_images = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if attrs.get("id"):
+            self.ids.add(attrs["id"])
         if tag == "a":
             self.anchor_stack.append(attrs.get("href", ""))
         if tag == "img":
             self.linked_images.append((attrs.get("src", ""), self.anchor_stack[-1] if self.anchor_stack else ""))
+            if not self.details and attrs.get("src", "").startswith("docs/images/"):
+                self.unfolded_showcase_images.append(attrs["src"])
         if attrs.get("lang"):
             self.languages.add(attrs["lang"])
         if tag == "div":
@@ -158,12 +164,39 @@ def check_document(relative, tracked=None):
             headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", release_guide, re.M)
             if fragment not in {heading.lower().replace(" ", "-") for heading in headings}:
                 errors.append(f"{badge} badge target section does not exist: {expected}")
+    if relative in LANGUAGE_PAGES:
+        # Overview headings use plain text. Check its local navigation without
+        # imposing a product-copy vocabulary or a fixed section count.
+        anchors = set(parser.ids)
+        counts = {}
+        for heading in re.findall(r"^#{1,6}\s+(.+?)\s*$", clean, re.M):
+            heading = re.sub(r"<[^>]+>|[*`~]", "", heading).lower()
+            slug = re.sub(r"[^\w -]", "", heading).replace(" ", "-")
+            count = counts.get(slug, 0)
+            anchors.add(slug if not count else f"{slug}-{count}")
+            counts[slug] = count + 1
+        navigation = re.findall(r"(?<!!)\[[^\]\n]+\]\(\s*#([^\s)]+)\s*\)", clean)
+        for fragment in navigation:
+            if unquote(fragment) not in anchors:
+                errors.append(f"overview navigation points to a missing heading: #{fragment}")
+        # A showcase should not disappear into the folded details again.
+        details_depth = 0
+        unfolded_markdown_image = False
+        for line in lines:
+            details_depth += len(re.findall(r"<details\b", line))
+            if not details_depth and re.search(r"!\[[^\]]*\]\(docs/images/", line):
+                unfolded_markdown_image = True
+            details_depth -= len(re.findall(r"</details>", line))
+        if not unfolded_markdown_image and not parser.unfolded_showcase_images:
+            errors.append("overview must show a provenance-documented viewport image outside folded details")
     if relative in MULTILINGUAL and not {"en", "zh-CN", "ja"}.issubset(parser.languages):
         errors.append("multilingual entry lacks explicit English/Chinese/Japanese language markers")
     if re.search(r'<font\b|style\s*=[^>]*font-family', clean, re.I):
         errors.append("do not rely on GitHub-filtered font overrides; use semantic language markers")
     for number, line in enumerate(lines, 1):
         no_code = re.sub(r"`[^`]*`", "", line)
+        if re.search(r"!\[\s*\]\(", no_code):
+            errors.append(f"line {number}: image has no alt text")
         if re.search(r"[A-Za-z0-9]\[[^\]\n]+\]\([^\n)]+\)", no_code):
             errors.append(f"line {number}: English text is joined directly to a Markdown link; add a space")
         if re.match(r"^日本語[:：]", line) and number > 1 and re.match(r"^中文[:：]", lines[number-2]):
