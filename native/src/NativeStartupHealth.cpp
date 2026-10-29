@@ -29,11 +29,14 @@ constexpr auto pipeKey = "GSW_NATIVE_STARTUP_PIPE";
 constexpr auto attemptKey = "GSW_NATIVE_STARTUP_ATTEMPT";
 constexpr auto nonceKey = "GSW_NATIVE_STARTUP_NONCE";
 constexpr qsizetype messageLimit = 8192;
+// The same finite observation contract in production and the isolated product.
+// A former fixture-only 1.5 s shortcut expired before actual Windows cold-start
+// composition (6.004 s in run 40817655279), making the real ready ACK impossible.
+// Do not move the clock origin or weaken peer/nonce/window validation instead.
+constexpr quint32 observationMs = 15000;
 #ifdef GSW_UPDATER_FIXTURE_BUILD
-constexpr quint32 observationMs = 1500;
 constexpr auto acceptedScope = "qt-fixture-window-surface";
 #else
-constexpr quint32 observationMs = 15000;
 constexpr auto acceptedScope = "main-window-base-viewport";
 #endif
 

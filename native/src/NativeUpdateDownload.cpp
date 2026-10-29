@@ -141,7 +141,7 @@ public:
   QUrl activeUrl;
   qint64 bytes = 0, requestOffset = 0;
   quint64 generation = 0, responseSerial = 0;
-  int httpStatus = 0, redirects = 0;
+  int httpStatus = 0, redirects = 0, attempts = 1;
 
   explicit Impl(NativeUpdateDownload *owner) : q(owner), manager(owner), deadline(owner) {
     deadline.setSingleShot(true);
@@ -389,6 +389,46 @@ public:
     });
   }
 
+  void retryLater(const QString &exhaustedCode) {
+    if (attempts >= policy.maximumAttempts) { finish(exhaustedCode); return; }
+    if (part.isOpen() && !part.flush()) { finish(QStringLiteral("download_write_failed")); return; }
+    // Only the original signed identity/length/hash plus a strong validator
+    // can keep an already-owned prefix across a retry. A response body is not
+    // accepted until its next 200/206 headers independently pass validation.
+    if (bytes > 0 && (!resumeValid || !strongEtag(entityTag))) {
+      part.close();
+      const auto partPath = request.destinationPath + QStringLiteral(".part");
+      const auto resumePath = request.destinationPath + QStringLiteral(".resume.json");
+      if ((ownsPart && !ordinaryLocalPath(partPath)) || (ownsResume && !ordinaryLocalPath(resumePath))) {
+        finish(QStringLiteral("download_path_unsafe")); return;
+      }
+      if ((ownsPart && QFileInfo::exists(partPath) && !QFile::remove(partPath)) ||
+          (ownsResume && QFileInfo::exists(resumePath) && !QFile::remove(resumePath))) {
+        finish(QStringLiteral("download_write_failed")); return;
+      }
+      ownsPart = false; ownsResume = false; resumeValid = false;
+      entityTag.clear(); bytes = 0; resumed = false;
+    }
+    if (reply) {
+      QObject::disconnect(reply, nullptr, q, nullptr);
+      auto *previous = reply.data(); reply = nullptr;
+      previous->abort(); previous->deleteLater();
+    }
+    const auto serial = ++responseSerial;
+    const auto token = generation;
+    const auto target = activeUrl;
+    ++attempts;
+    const int delay = qMin(5000, policy.retryDelayMs * (1 << (attempts - 2)));
+    if (!transition(State::RetryWait) || !active || generation != token) return;
+    QTimer::singleShot(delay, q, [this, target, token, serial] {
+      if (!active || generation != token || responseSerial != serial) return;
+      if (!deadline.isActive() || deadline.remainingTime() <= 0) {
+        finish(QStringLiteral("download_total_timeout")); return;
+      }
+      issueRequest(target); // The original total deadline is never restarted.
+    });
+  }
+
   bool acceptHeaders() {
     if (!active || !reply) return false;
     if (headersAccepted) return true;
@@ -400,6 +440,7 @@ public:
     if (httpStatus == 301 || httpStatus == 302 || httpStatus == 303 || httpStatus == 307 || httpStatus == 308) {
       followRedirect(); return false;
     }
+    if (httpStatus == 503) { retryLater(QStringLiteral("download_http_error")); return false; }
     if (httpStatus != 200 && httpStatus != 206) { finish(QStringLiteral("download_http_error")); return false; }
     const auto encoding = reply->rawHeader("Content-Encoding").trimmed().toLower();
     if (!encoding.isEmpty() && encoding != "identity") {
@@ -515,7 +556,7 @@ bool NativeUpdateDownload::start(const NativeUpdateDownloadRequest &request, con
   m->request = request; m->policy = policy; m->active = true;
   m->headersAccepted = false; m->ownsPart = false; m->bytes = 0; m->httpStatus = 0;
   m->ownsResume = false; m->resumeValid = false; m->resumed = false; m->requestOffset = 0; m->entityTag.clear();
-  m->redirects = 0; m->activeUrl = {};
+  m->redirects = 0; m->attempts = 1; m->activeUrl = {};
   const auto token = ++m->generation;
   QTimer::singleShot(0, this, [this, token] { if (m->active && token == m->generation) m->begin(); });
   return true;
