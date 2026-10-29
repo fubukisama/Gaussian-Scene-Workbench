@@ -6,6 +6,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCryptographicHash>
 #include <QDialog>
 #include <QDateTime>
 #include <QDir>
@@ -13,8 +14,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLibraryInfo>
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QPointer>
@@ -82,6 +85,28 @@ int main(int argc, char **argv) {
   QString failure, lastText;
   quintptr foreground = 0;
   qint64 armedAt = -1, activatedAt = -1;
+  // [DEBUG-auto-tls-1] Read-only inherited/loader context. No SSL backend is
+  // loaded here and no process environment, certificate or search path changes.
+  QJsonObject environmentFingerprints;
+  for (const auto *key : {"PATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH",
+          "QT_SSL_BACKEND", "SSL_CERT_FILE", "SSL_CERT_DIR", "OPENSSL_CONF", "QT_LOGGING_RULES"}) {
+    const auto value = qgetenv(key);
+    environmentFingerprints.insert(QLatin1String(key), QJsonObject{
+      {"present", qEnvironmentVariableIsSet(key)}, {"bytes", double(value.size())},
+      {"sha256", QString::fromLatin1(QCryptographicHash::hash(value, QCryptographicHash::Sha256).toHex())}});
+  }
+  QString dllDirectory;
+#ifdef Q_OS_WIN
+  wchar_t dllPath[32768]{};
+  const auto dllLength = GetDllDirectoryW(32768, dllPath);
+  if (dllLength < 32768) dllDirectory = QString::fromWCharArray(dllPath, int(dllLength));
+#endif
+  const QJsonObject runtimeContext{{"diagnosticTag", "DEBUG-auto-tls-1"},
+    {"qtVersion", QString::fromLatin1(qVersion())}, {"currentDirectory", QDir::currentPath()},
+    {"applicationDirectory", QCoreApplication::applicationDirPath()},
+    {"qtLibraryPaths", QJsonArray::fromStringList(QCoreApplication::libraryPaths())},
+    {"qtCompiledPluginPath", QLibraryInfo::path(QLibraryInfo::PluginsPath)},
+    {"windowsDllDirectory", dllDirectory}, {"environmentFingerprints", environmentFingerprints}};
   auto state = [&](const char *phase) {
     return QJsonObject{{"phase", QLatin1String(phase)}, {"label", "A"},
       {"buildId", "fixture-a"}, {"executable", app.applicationFilePath()},
@@ -91,6 +116,7 @@ int main(int argc, char **argv) {
       {"foregroundWindow", QString::number(quint64(foreground), 16)},
       {"automaticCheck", QSettings().value("updates/automaticCheck", true).toBool()},
       {"prepareForNextLaunch", QSettings().value("updates/prepareForNextLaunch", false).toBool()},
+      {"runtimeContext", runtimeContext},
       {"failure", failure}};
   };
   auto fail = [&](const char *code) {

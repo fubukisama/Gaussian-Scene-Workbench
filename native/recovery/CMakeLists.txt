@@ -45,6 +45,7 @@ add_library(gsw_recovery_shared STATIC
   ../src/NativeInstallation.cpp ../src/NativeInstallation.h
   ../src/NativeStartupHealth.cpp ../src/NativeStartupHealth.h)
 target_include_directories(gsw_recovery_shared PUBLIC ../src)
+target_include_directories(gsw_recovery_shared PRIVATE ../third_party/nlohmann ../third_party/miniz)
 target_link_libraries(gsw_recovery_shared PUBLIC Qt6::Core Qt6::Widgets)
 if(WIN32)
   target_link_libraries(gsw_recovery_shared PRIVATE Shell32 Ole32 Propsys User32 Uuid bcrypt advapi32)
