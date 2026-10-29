@@ -74,7 +74,8 @@ public:
     if (argc != 2 || argv == nullptr || argv[1] == nullptr ||
         std::strcmp(argv[1], "--smoke-test-infinite-grid") != 0 ||
         !environmentEquals("GITHUB_ACTIONS", "true") ||
-        !environmentEquals("GITHUB_REPOSITORY", "fubukisama/Gaussian-Scene-Workbench") ||
+        // Immutable ID keeps this exact repository guard valid after renames.
+        !environmentEquals("GITHUB_REPOSITORY_ID", "1286130219") ||
         !environmentEquals("GSW_GRID_QA_TRACE", "1")) return;
     mEnabled = true;
     mStart = Clock::now();

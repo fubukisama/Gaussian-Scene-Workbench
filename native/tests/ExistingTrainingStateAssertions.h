@@ -27,6 +27,8 @@ inline PausedObserverPresentationResult checkPausedObserverPresentation(
     const QString &expectedEndedLabel) {
   PausedObserverPresentationResult result;
   const QJsonObject before = observer.currentReport();
+  const bool connectedBefore = observer.isConnected();
+  const bool inspectionBusyBefore = observer.isBusy();
   auto *combo = observer.findChild<QComboBox *>(QStringLiteral("existingTrainingJobCombo"));
   auto *details = observer.findChild<QLabel *>(QStringLiteral("existingTrainingState"));
   const QString expectedCaption = expectedOutputName + QStringLiteral(" | ") + expectedJobId +
@@ -43,6 +45,8 @@ inline PausedObserverPresentationResult checkPausedObserverPresentation(
                    {"reportJobId", before.value(QStringLiteral("jobId"))},
                    {"recordedState", before.value(QStringLiteral("recordedState"))},
                    {"liveness", before.value(QStringLiteral("liveness"))},
+                   {"connectedBefore", connectedBefore},
+                   {"inspectionBusyBefore", inspectionBusyBefore},
                    {"currentReport", before},
                    {"expectedCaption", expectedCaption},
                    {"status", "NOT_RUN"}};
@@ -51,7 +55,12 @@ inline PausedObserverPresentationResult checkPausedObserverPresentation(
   if (qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
       QApplication::platformName() != QStringLiteral("windows") || !observer.isVisible())
     fail("requires the existing remote Windows observer-ended real-window fixture");
-  if (!observer.isConnected() || observer.isBusy() ||
+  // The owned fixture already acknowledged pause and exited normally before
+  // this read-only presentation matrix. Its connected observer continues its
+  // normal two-second inspect polling: a transient helper is not a new training
+  // state and must not invalidate the last accepted terminal report. Observe
+  // that activity explicitly; never stop it, wait/retry for idle, or change UI.
+  if (!connectedBefore ||
       before.value(QStringLiteral("jobId")).toString() != expectedJobId ||
       before.value(QStringLiteral("recordedState")) != QStringLiteral("paused") ||
       before.value(QStringLiteral("liveness")) != QStringLiteral("ended"))
@@ -85,8 +94,10 @@ inline PausedObserverPresentationResult checkPausedObserverPresentation(
     fail("current observer details do not expose the expected paused/ended state");
   const QJsonObject after = observer.currentReport();
   out["afterCurrentReport"] = after;
+  out["connectedAfter"] = observer.isConnected();
+  out["inspectionBusyAfter"] = observer.isBusy();
   const bool unchanged = after == before && observer.isConnected() &&
-      !observer.isBusy() && combo->currentData().toString() == selectedId;
+      combo->currentData().toString() == selectedId;
   out["publicStateUnchanged"] = unchanged;
   if (!unchanged) fail("read-only presentation observation changed public report or connection identity");
   result.passed = errors.isEmpty();
