@@ -1,6 +1,6 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **FORMS_REPAIR_SUBGATE_PASS / AC5_FULL_CI_FAIL / LATER_SOURCE_CI_RUNNING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_WIRING_REPAIR_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
 这不是发布许可或“全面升级完成”报告。`ACCEPTANCE_STATUS.md/.json` 继续作为旧
 `ffb8eb2` 快照保留；更早的失败、原始结果及本文前版均保存在证据目录和 Git 历史中。
@@ -29,7 +29,7 @@ Status: **FORMS_REPAIR_SUBGATE_PASS / AC5_FULL_CI_FAIL / LATER_SOURCE_CI_RUNNING
 | [Native Windows 40800786447](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40800786447) — Qt job `123208136906` | `ac5c77b` | **FAIL**：4 个 graphics-bootstrap 中3个 PASS，`native_infinite_reference_grid` 在 **15.06s TIMEOUT**，没有测试输出。 | 失败发生在进入完整 Test 前；不能写成该提交175 CTests或新产品包已通过。原因未知，详见第5节。 |
 | 同一 run — upstream viewport | `ac5c77b` | **SUCCESS**。 | 独立子 job 的成功不消除 Qt bootstrap 失败。 |
 | 同一 run — CodeQL | `ac5c77b` | 最近交接时仍 **RUNNING**。 | 不能从旧成功推定其已完成。 |
-| [Native Windows 40801832785](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801832785) | `9803c86` | 最近交接时 **RUNNING**；已通过 graphics-bootstrap，进入完整 Test。 | 是自然的新 source 运行，不是旧 ac5 失败重分类；完整结果、包和其余 jobs 仍待完成。 |
+| [Native Windows 40801832785](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801832785) | `9803c86` | 4个 bootstrap、**175/175 CTests PASS**（2241.71s），upstream SUCCESS；随后 managed publication 步骤 **FAIL**。CodeQL独立记录。 | 已定位为调用缺 `DeveloperPublisher` / `PythonExecutable` 两个新增必填参数，不是175测试失败。主流水线补独立开发工具构建和参数接线，修复后完整产品包回读仍待验。 |
 | [历史 Forms 40743097537](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743097537) | `a5393be` | SUCCESS；34/34选定 CTests、16类192格完整。 | 正常尺寸原图后来发现3类真实缺陷；不能以 capture 完整宣称视觉通过。 |
 | [历史完整 Native Windows 40743102181](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743102181) | `a5393be` | 当时3 jobs SUCCESS；直接日志为4 bootstrap、175 CTests、upstream 65+6及 CodeQL 通过。 | 随后便携 artifact 下载回读发现隐藏文件被过滤，不能由 staging 绿灯替代实际分发包。 |
 
@@ -118,10 +118,18 @@ bootstrap PASS。对应 grid / main / viewport 源码未改动，但这既不证
 原临时路径在 C:、上传查找目录在 runner 的 D:，因此缺少 snapshot **不能推断程序
 停在哪个阶段**。不能从“没有图”推导未 show、GL 失败或缓存死锁。
 
-单次失败二进制 replay 的诊断 workflow / script 已准备，最近交接时**尚未 dispatch**：
-只复用失败二进制、一个进程、原15s deadline、fresh TMP trace；它是诊断，不是性能
-复测或接受凭证。后续980自然运行通过 bootstrap 是新 source 的反例观察，不将 ac5
-原失败改成 PASS。所有后续结果仍需独立保留 source / EXE / environment 身份。
+单次失败二进制 replay [40808313281](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40808313281)
+已完成：原产品ac5 EXE SHA256 `ce5dae8f74a76ca5c3962291d1285f4d2a4139d583aa4b6768a3cf2a634cf627`，
+脚本592b6c4，无产品重建，只执行一次原命令，限制仍15s，实际6.83778s。
+网格内部阶段1216ms／frame9，shader／固定原点通过，+X正交姿态正确，字体／矢量／合成trace完成；
+原图实际收集到自有D盘TMP。结果仅为 **NOT_REPRODUCED_IN_THIS_ONE_RUN**，不宣称原超时根因已修复。
+CRT复用预装System32 AMD64 `14.51.36247.0`，原故障CRT版本未记录，环境不声称字节一致。
+先前40805693324在Prepare发现诊断ZIP不含CRT而拒绝，实际启动0个应用；仅修诊断依赖寻址后才作上述一次调用，
+没有下载DLL、改系统组件或重复刷绿。
+
+证据目录 `D:/Codex/validation/gsw-ui-upgrade-20261028/grid-diagnostic-run40808313281/`；
+`one-process-result.json` SHA256 `ce4e852d48ea8fbe24ad0560c12ff5e316a3e5f343cbca6860908222988bcf3a`。
+980的自然运行又通过bootstrap和175测试，也不把旧ac5失败重分类。
 
 ## 6. 性能结果保持不变
 
@@ -163,7 +171,7 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | MODEL-01 | NOT_RUN | 历史多对象合同保留，真实 fixture / transform 身份有记录。 | 当前原／非当前、全隐藏恢复、相机／单位／源文件的完整具体签收仍开放。 |
 | MODEL-02 | NOT_RUN | 受控 renderer / 点数 / SH / TRS / fixture receipts 保留。 | 点云、网格、3DGS、2DGS、任务预览的完整画面／选择／导航不可由模式标签或计时 receipt 代替。 |
 | OVERLAY-01 | NOT_RUN | 选择／刷选／裁剪／提示入口和合同登记保留。 | 多尺度／视角／状态原图及数据保护未逐项闭环。 |
-| GRID-01 | FAIL | 历史三语 presentation PASS；ac5 bootstrap `native_infinite_reference_grid` 15.06s TIMEOUT。 | 无输出、原因未知；单次失败二进制诊断尚未完成，不能延时／删断言关闭。980 新运行的 bootstrap PASS 不改写旧失败。 |
+| GRID-01 | NOT_RUN | 历史三语presentation PASS；ac5原始15.06s超时保留；同一失败EXE一次15s诊断6.84s通过；980bootstrap及完整175测试通过。 | 原超时原因未证实，不宣称已修根因；网格单位／密度等全量范围仍需对应签收。 |
 | FPS-01 | NOT_RUN | 新帧 serial / swap / metrics 和有效空闲原始时窗存在，未增加持续重绘 timer。 | 聚合计时未接受，不以局部0计数或耗时倒数冒充完整 FPS 验收。 |
 | FORM-01 | NOT_RUN | **修复子门 PASS**：ac5 34 CTests、300 profiles、16类192格0缺项；5张新图关闭3类已知缺陷。 | 全部 popup／特殊状态／provider／嵌套提示／无障碍和全量视觉不是该子门覆盖；不宣称全192格人工审阅。 |
 | STATE-01 | NOT_RUN | 受控 task / worker / forms 旧合同及本轮公开 snapshot 保护保留。 | 空／加载／忙／失败／取消／重试／不支持的全表面具体证据仍未齐。 |
@@ -175,7 +183,7 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
 | PKG-01 | NOT_RUN | 历史 Setup 静态／向导／远端安装检查通过；隐藏文件 roundtrip fixture PASS。 | 旧 a539 便携实际 FAIL 保留；ac5 新完整真包门未执行，980 新包未完成；fixture 不替代产品。 |
 | DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
-| CLOUD-01 | FAIL | 历史 a539 完整 SUCCESS 保留；ac5 Forms与upstream SUCCESS。 | ac5 Qt job FAIL，CodeQL最近仍RUNNING；980完整run RUNNING，不继承旧绿灯。 |
+| CLOUD-01 | FAIL | 历史a539完整SUCCESS；ac5 Forms／upstream成功；980 bootstrap及175测试成功。 | 980发布测试因新增mandatory参数未接线而失败；修复接线已实现待远端复验；包与CodeQL分开记录，不继承旧绿灯。 |
 
 ## 8. 早期导航修复与来源边界
 
@@ -201,8 +209,8 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
 
 接下来必须分别处理：
 
-1. 对 ac5 grid timeout 做一次有界、原失败二进制诊断；原因未知前不猜修、不延时刷绿。
-2. 等980对应完整 CI 与实际产品 artifact，核对 source / EXE / Setup / manifest /
+1. 原失败二进制单次诊断已完成且未复现；保留旧失败和环境限制，不再反复复测求绿。
+2. 复验发布器独立构建与新增参数接线，再取得对应完整CI及实际产品artifact，核对 source / EXE / Setup / manifest /
    source resources / hidden files / 许可和依赖；不要拿 fixture 或历史包替代。
 3. 完成尚未签收的表面、视觉、无障碍及 provider／硬件／OS支持边界；已通过的16类矩阵
    和3处修复不再写成待导入，也不扩张为全部UI完成。
