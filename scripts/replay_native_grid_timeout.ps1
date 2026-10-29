@@ -19,7 +19,18 @@ function NewJson([string]$Path,$Value){
   $stream=[IO.FileStream]::new($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try{$stream.Write($bytes);$stream.Flush($true)}finally{$stream.Dispose()}
 }
+function RequireX64Pe([string]$Path){
+  $stream=[IO.File]::OpenRead($Path);$reader=[IO.BinaryReader]::new($stream)
+  try{
+    Require ($stream.Length -ge 64 -and $reader.ReadUInt16() -eq 0x5a4d) 'Selected CRT is not a PE file.'
+    $stream.Position=0x3c;$offset=$reader.ReadInt32()
+    Require ($offset -ge 64 -and $offset -le $stream.Length-6) 'Selected CRT has an invalid PE header.'
+    $stream.Position=$offset
+    Require ($reader.ReadUInt32() -eq 0x4550 -and $reader.ReadUInt16() -eq 0x8664) 'Selected CRT must be x64 AMD64.'
+  }finally{$reader.Dispose();$stream.Dispose()}
+}
 Require ($IsWindows -and $env:GITHUB_ACTIONS -ceq 'true' -and $env:GITHUB_EVENT_NAME -ceq 'workflow_dispatch') 'Remote manual Windows diagnostic only.'
+Require ([Environment]::Is64BitProcess) 'The diagnostic must use the native x64 Windows process/runtime view.'
 Require ($env:GITHUB_REPOSITORY -ceq $repository -and $env:GITHUB_REF -ceq 'refs/heads/main') 'Unexpected diagnostic repository/ref.'
 Require ($env:RUNNER_TEMP -match '^D:[\\/]') 'An owned D-drive runner.temp is required; no local/system-drive fallback.'
 $root=Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'gsw-grid-timeout-once'
@@ -28,8 +39,9 @@ $payload=Join-Path $root 'payload'
 $receipt=Join-Path $root 'verified-artifact.json'
 $exe=Join-Path $payload 'bin/Gaussian Scene Workbench.exe'
 $requiredRuntime=@('bin/Qt6Core.dll','bin/Qt6Gui.dll','bin/Qt6Widgets.dll','bin/Qt6Network.dll',
-  'bin/Qt6OpenGL.dll','bin/Qt6OpenGLWidgets.dll','bin/Qt6Svg.dll','bin/platforms/qwindows.dll',
-  'bin/MSVCP140.dll','bin/VCRUNTIME140.dll','bin/VCRUNTIME140_1.dll')
+  'bin/Qt6OpenGL.dll','bin/Qt6OpenGLWidgets.dll','bin/Qt6Svg.dll','bin/platforms/qwindows.dll')
+$crtNames=@('MSVCP140.dll','VCRUNTIME140.dll','VCRUNTIME140_1.dll')
+$systemDirectory=[Environment]::SystemDirectory
 
 if($Mode -ceq 'Prepare'){
   Require (-not(Test-Path -LiteralPath $root)) 'Evidence root must be fresh; do not overwrite/replay a previous attempt.'
@@ -78,6 +90,12 @@ if($Mode -ceq 'Prepare'){
     }finally{$response.Dispose()}
   }finally{$cancel.Dispose();$download.Dispose();$location=$null}
   Require ((Get-Item -LiteralPath $archive).Length -eq $archiveBytes -and (Hash $archive) -ceq $archiveSha) 'Downloaded original archive bytes/digest mismatch.'
+  # Retain the independently verified download even if extraction/dependency
+  # prechecks refuse execution. The previous attempt started no app process.
+  NewJson (Join-Path $root 'downloaded-archive.json') ([ordered]@{schema='gsw.one_grid_replay_download/1';
+    productSourceCommit=$productCommit;failedRunId=$failedRun;artifactId=$artifactId;archiveBytes=$archiveBytes;
+    archiveSha256=$archiveSha;harnessSourceCommit=$env:GITHUB_SHA;applicationExecuted=$false;
+    dependencyPrecheck='NOT_YET_COMPLETED';verifiedUtc=[DateTime]::UtcNow.ToString('o')})
   $zip=[IO.Compression.ZipFile]::OpenRead($archive)
   try{
     Require ($zip.Entries.Count -gt 0 -and $zip.Entries.Count -lt 20000) 'Diagnostic archive file-count bound exceeded.'
@@ -94,9 +112,23 @@ if($Mode -ceq 'Prepare'){
     Require (Test-Path -LiteralPath (Join-Path $payload $relative) -PathType Leaf) "Original diagnostic runtime file missing: $relative; no replacement will be installed."
   }
   $runtime=@($requiredRuntime|ForEach-Object{@{path=$_;sha256=(Hash (Join-Path $payload $_))}})
+  $crt=@(foreach($name in $crtNames){
+    $selected=Join-Path $payload ('bin/'+$name);$source='archive'
+    if(-not(Test-Path -LiteralPath $selected -PathType Leaf)){
+      $selected=Join-Path $systemDirectory $name;$source='preinstalled_system32'
+    }
+    Require (Test-Path -LiteralPath $selected -PathType Leaf) "Required CRT is absent from both the original archive and preinstalled System32: $name; nothing will be installed."
+    RequireX64Pe $selected
+    $version=(Get-Item -LiteralPath $selected).VersionInfo.FileVersion
+    Require (-not [string]::IsNullOrWhiteSpace($version)) "Selected CRT version metadata unavailable: $name."
+    @{name=$name;source=$source;absolutePath=[IO.Path]::GetFullPath($selected);sha256=(Hash $selected);
+      fileVersion=$version;machine='AMD64';originalCrtVersion='NOT_RECORDED'}
+  })
   NewJson $receipt ([ordered]@{schema='gsw.one_grid_replay_artifact/1';productSourceCommit=$productCommit;
     failedRunId=$failedRun;artifactId=$artifactId;archiveBytes=$archiveBytes;archiveSha256=$archiveSha;
-    harnessSourceCommit=$env:GITHUB_SHA;executableSha256=(Hash $exe);runtime=$runtime;
+    harnessSourceCommit=$env:GITHUB_SHA;executableSha256=(Hash $exe);runtime=$runtime;crt=$crt;
+    originalCrtVersion='NOT_RECORDED';byteIdenticalEnvironment=$false;
+    crtPolicy='Reuse archive CRT when present, otherwise existing x64 System32; no install/copy/replace';
     productRebuilt=$false;applicationExecuted=$false;archiveMayLackHiddenSource=$true;
     scope='Original failed diagnostic binary only; not product/package acceptance'})
   Write-Output 'Exact failed artifact verified and extracted; no application executed.'
@@ -109,6 +141,16 @@ Require ($identity.productSourceCommit -ceq $productCommit -and $identity.artifa
   $identity.archiveSha256 -ceq $archiveSha -and (Hash $archive) -ceq $archiveSha -and
   (Hash $exe) -ceq $identity.executableSha256) 'Original binary/archive changed after verification.'
 foreach($row in $identity.runtime){Require ((Hash (Join-Path $payload $row.path)) -ceq $row.sha256) 'Original runtime bytes changed.'}
+Require ($identity.crt.Count -eq $crtNames.Count -and $identity.originalCrtVersion -ceq 'NOT_RECORDED' -and
+  $identity.byteIdenticalEnvironment -eq $false) 'CRT provenance/limitations unavailable.'
+foreach($name in $crtNames){
+  $rows=@($identity.crt|Where-Object {$_.name -ceq $name});Require ($rows.Count -eq 1) 'Unambiguous selected CRT identity required.'
+  $row=$rows[0];Require ($row.source -cin @('archive','preinstalled_system32')) 'Unexpected CRT source.'
+  $expected=if($row.source -ceq 'archive'){Join-Path $payload ('bin/'+$name)}else{Join-Path $systemDirectory $name}
+  Require ([IO.Path]::GetFullPath($expected).Equals($row.absolutePath,[StringComparison]::OrdinalIgnoreCase) -and
+    (Hash $expected) -ceq $row.sha256) 'Selected CRT path/bytes changed after verification.'
+  RequireX64Pe $expected
+}
 Require (-not(Test-Path -LiteralPath (Join-Path $root 'process-started.json'))) 'This diagnostic already started its one application process.'
 Require (-not [string]::IsNullOrEmpty($env:QT_OPENGL_DLL) -and (Test-Path -LiteralPath $env:QT_OPENGL_DLL -PathType Leaf)) 'Pinned CI Mesa runtime unavailable.'
 $ctest=(Get-Command ctest.exe -CommandType Application -ErrorAction Stop).Source
@@ -128,6 +170,7 @@ NewJson (Join-Path $root 'process-started.json') ([ordered]@{productSourceCommit
   harnessSourceCommit=$env:GITHUB_SHA;command=@($exe,'--smoke-test-infinite-grid');timeoutSeconds=15;
   originalTestName='native_infinite_reference_grid';maximumApplicationProcesses=1;repeat=$false;
   executableSha256=(Hash $exe);mesaDllSha256=(Hash $env:QT_OPENGL_DLL);temporaryDirectory=$temporary;
+  crt=$identity.crt;originalCrtVersion='NOT_RECORDED';byteIdenticalEnvironment=$false;
   trace='GSW_UI_QA_TRACE=1';diagnosticOnly=$true;startedUtc=[DateTime]::UtcNow.ToString('o')})
 $PSNativeCommandUseErrorActionPreference=$false
 & $ctest --test-dir $harness --no-tests=error --verbose --output-on-failure --output-log (Join-Path $harness 'grid-replay.log') --output-junit (Join-Path $harness 'grid-replay.xml') -R '^native_infinite_reference_grid$'
@@ -137,5 +180,6 @@ NewJson (Join-Path $root 'one-process-result.json') ([ordered]@{schema='gsw.one_
   productSourceCommit=$productCommit;harnessSourceCommit=$env:GITHUB_SHA;ctestExitCode=$code;
   diagnosticVerdict=$(if($code -eq 0){'NOT_REPRODUCED_IN_THIS_ONE_RUN'}else{'REPLAY_FAILED_INSPECT_TRACE'});
   originalFailurePreserved=$true;productRebuilt=$false;packageAcceptance=$false;performanceComparison=$false;
+  crt=$identity.crt;originalCrtVersion='NOT_RECORDED';byteIdenticalEnvironment=$false;
   timeoutSeconds=15;maximumApplicationProcesses=1;repeat=$false;images=$images;completedUtc=[DateTime]::UtcNow.ToString('o')})
 exit $code
