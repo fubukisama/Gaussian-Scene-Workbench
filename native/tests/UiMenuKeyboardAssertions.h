@@ -69,11 +69,65 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
                    {"sourceCommit", qEnvironmentVariable("GSW_UI_SOURCE_COMMIT")},
                    {"caseId", caseId}, {"platform", QApplication::platformName()},
                    {"status", "NOT_RUN"}, {"inputKind", "actual Qt widget key events"},
+                   {"ownershipPolicy", "QObject-parent-tree-and-existing-menu-action-graph"},
                    {"physicalOsKeyboardClaim", false}, {"directActionsTriggeredByHelper", false}};
-  QJsonArray errors, keys, pathRecords, itemRecords, triggeredActions;
+  QJsonArray errors, keys, pathRecords, itemRecords, triggeredActions, receiverChecks;
   bool missingDisabledReasonOracle = false;
   const auto fail = [&](const char *reason) { errors.append(QString::fromLatin1(reason)); };
   auto *bar = ownedWindow.findChild<QMenuBar *>();
+  const auto objectIdentity = [](const QObject *object) {
+    return object ? QJsonObject{{"id", object->objectName()},
+        {"class", QString::fromLatin1(object->metaObject()->className())},
+        {"instance", QString::number(quintptr(object), 16)}} : QJsonObject{{"null", true}};
+  };
+  const auto objectOwnedByWindow = [&](const QObject *object) {
+    // QObject ownership crosses QWidget window boundaries; QWidget::isAncestorOf
+    // explicitly requires the same window and therefore rejects Qt::Popup menus.
+    for (int depth = 0; object && depth < 64; ++depth, object = object->parent())
+      if (object == &ownedWindow) return true;
+    return false;
+  };
+  const auto parentChain = [&](const QObject *object) {
+    QJsonArray chain;
+    for (int depth = 0; object && depth < 16; ++depth, object = object->parent()) {
+      chain.append(objectIdentity(object));
+      if (object == &ownedWindow) break;
+    }
+    return chain;
+  };
+  const auto reachableMenu = [&](const QMenu *target) {
+    if (!target || !bar || !objectOwnedByWindow(bar) || !objectOwnedByWindow(target)) return false;
+    QList<QMenu *> pending;
+    for (auto *action : bar->actions()) if (action->menu()) pending.append(action->menu());
+    QSet<QMenu *> seen;
+    // A shared action graph can revisit a menu. Bound and de-duplicate it rather
+    // than treating an arbitrary QObject-owned popup as an accepted menu.
+    while (!pending.isEmpty() && seen.size() < 128) {
+      auto *menu = pending.takeFirst();
+      if (seen.contains(menu) || !objectOwnedByWindow(menu)) continue;
+      seen.insert(menu);
+      if (menu == target) return true;
+      for (auto *action : menu->actions()) if (action->menu()) pending.append(action->menu());
+    }
+    return false;
+  };
+  const auto widgetOwnership = [&](QWidget *widget) {
+    auto *menuWindow = widget ? qobject_cast<QMenu *>(widget->window()) : nullptr;
+    const bool objectOwned = objectOwnedByWindow(widget);
+    const bool mainWindow = widget && widget->window() == &ownedWindow;
+    const bool menuReachable = menuWindow && reachableMenu(menuWindow);
+    return QJsonObject{{"object", objectIdentity(widget)}, {"parentChain", parentChain(widget)},
+        {"window", objectIdentity(widget ? widget->window() : nullptr)},
+        {"isWindow", widget && widget->isWindow()},
+        {"windowType", widget ? int(widget->windowType()) : -1},
+        {"widgetAncestorSameWindow", widget && ownedWindow.isAncestorOf(widget)},
+        {"qobjectOwnedByMainWindow", objectOwned}, {"windowIsMainWindow", mainWindow},
+        {"menuWindowReachableFromBar", bool(menuReachable)},
+        {"accepted", objectOwned && (mainWindow || menuReachable)}};
+  };
+  out["menuBarOwnership"] = widgetOwnership(bar);
+  out["initialFocusOwnership"] = widgetOwnership(QApplication::focusWidget());
+  out["initialPopupOwnership"] = widgetOwnership(QApplication::activePopupWidget());
   if (qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
       QApplication::platformName() != QStringLiteral("windows") || !ownedWindow.isVisible() ||
       !ownedWindow.isActiveWindow() || QApplication::activeModalWidget() ||
@@ -83,15 +137,28 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
       path.size() > 2 || expectations.isEmpty() || expectations.size() > 8 || !publicSnapshot)
     fail("existing Qt menu bar, one/two-menu path, independent expectations and snapshot are required");
   if (bar && !path.isEmpty()) {
-    if (!path.first() || !bar->actions().contains(path.first()->menuAction()))
+    const bool barContainsTop = path.first() && bar->actions().contains(path.first()->menuAction());
+    out["barContainsTopMenuAction"] = barContainsTop;
+    if (!barContainsTop)
       fail("the supplied top menu is not an actual action of the owned menu bar");
+    QJsonArray ownership;
+    bool prefixReachable = barContainsTop;
     for (qsizetype index = 0; index < path.size(); ++index) {
       QMenu *menu = path.at(index);
-      if (!menu || !ownedWindow.isAncestorOf(menu) ||
-          (index && (!path.at(index - 1) ||
-                     !path.at(index - 1)->actions().contains(menu->menuAction()))))
+      const bool parentContainsAction = !index ? barContainsTop : menu && path.at(index - 1) &&
+          path.at(index - 1)->actions().contains(menu->menuAction());
+      prefixReachable = prefixReachable && parentContainsAction;
+      auto facts = widgetOwnership(menu);
+      facts["pathIndex"] = int(index);
+      facts["parentContainsMenuAction"] = parentContainsAction;
+      facts["pathActionPrefixReachable"] = prefixReachable;
+      facts["menuActionRefersToThisMenu"] = menu && menu->menuAction()->menu() == menu;
+      ownership.append(facts);
+      if (!menu || !objectOwnedByWindow(menu) || !reachableMenu(menu) || !prefixReachable ||
+          menu->menuAction()->menu() != menu)
         fail("menu path is not reachable through the existing owned menu actions");
     }
+    out["menuPathOwnership"] = ownership;
     if (path.last()) for (const auto &expected : expectations)
       if (!expected.action || expected.name.isEmpty() ||
           !path.last()->actions().contains(expected.action))
@@ -124,8 +191,13 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
                   : QJsonObject{{"null", true}};
   };
   const auto isOwned = [&](QWidget *widget) {
-    return owner && widget &&
-        (widget == owner.data() || owner->isAncestorOf(widget));
+    if (!owner || !widget || !objectOwnedByWindow(widget)) return false;
+    if (widget->window() == owner.data()) return true;
+    // Only actual QMenus reachable from this main window's existing menu bar
+    // can cross the window boundary. Another owned dialog/combo popup is not a
+    // keyboard target, and a foreign menu is rejected even if its text matches.
+    auto *menuWindow = qobject_cast<QMenu *>(widget->window());
+    return menuWindow && reachableMenu(menuWindow);
   };
   // Observe the real actions, including dangerous actions, without invoking any.
   // Connections are scoped and always disconnected before returning.
@@ -155,6 +227,10 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
     }
     QWidget *receiver = QApplication::activePopupWidget();
     if (!receiver) receiver = QApplication::focusWidget();
+    auto ownership = widgetOwnership(receiver);
+    ownership["key"] = code;
+    ownership["cleanup"] = cleanup;
+    receiverChecks.append(ownership);
     if (!isOwned(receiver)) {
       fail("keyboard receiver is outside the original owned window/menu hierarchy");
       return false;
@@ -178,7 +254,11 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
   const auto closeWithEscape = [&] {
     for (int index = 0; index < 4; ++index) {
       QWidget *popup = QApplication::activePopupWidget();
-      if (popup && !isOwned(popup)) { fail("foreign popup appeared; it is not closed by this helper"); break; }
+      if (popup && !isOwned(popup)) {
+        out["rejectedPopupOwnership"] = widgetOwnership(popup);
+        fail("foreign popup appeared; it is not closed by this helper");
+        break;
+      }
       if (!popup && !bar->hasFocus()) break;
       if (!key(Qt::Key_Escape, true)) break;
     }
@@ -195,6 +275,7 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
     out["status"] = QStringLiteral("NOT_RUN_F10_NOT_OBSERVED");
     out["errors"] = errors;
     out["keys"] = keys;
+    out["receiverOwnershipChecks"] = receiverChecks;
     out["triggeredActions"] = triggeredActions;
     const QJsonObject after = owner ? publicSnapshot() : QJsonObject{};
     out["publicSnapshotAfter"] = after;
@@ -298,6 +379,7 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
   out["path"] = pathRecords;
   out["items"] = itemRecords;
   out["keys"] = keys;
+  out["receiverOwnershipChecks"] = receiverChecks;
   out["keyCount"] = keyCount;
   out["elapsedMs"] = deadline.elapsed();
   out["triggeredActions"] = triggeredActions;

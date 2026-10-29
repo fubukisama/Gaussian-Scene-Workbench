@@ -2,6 +2,36 @@
 
 Status: **VERIFIED_7F76_PACKAGE_AND_A105_CLOUD / NEW_UI_REGRESSIONS_RUNNING / PERFORMANCE_REANALYSED_INCONCLUSIVE / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
+## 0C. c3e 复验：两处产品子门通过，剩余 QA 前置合同纠正
+
+[Forms40823927939](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40823927939)
+在精确c3e最终FAIL：原34项中33 PASS，唯一失败为runtime观察窗矩阵；新增菜单3项均未越过
+归属前置检查。16类捕获完整、integrity VALID，不把总红灯刷成绿灯。
+
+- 初始化独立CTest PASS；36条实际Name/Role/Tab/public-state记录PASS。COLMAP12条三语/主题/宽度组合hint均为中性文本，独立language-form-matrix PASS。
+- 暂停观察的12组合中11项caption/tooltip/details PASS，日文/浅色/标准窗为 **PRECONDITION_FAILED**，不是文字不匹配。此前已确认正常退出、同ID paused/ended；工具把观察器正常2秒inspect期间的`isBusy()`误当成终态无效。仅将busy改为前后事实记录，保留连接、ID、终态、完整报告和实际文字硬断言；不等待、不重试、不停轮询、不改生产或控制条件。
+- 菜单三语第一片均 **NOT_RUN_PRECONDITION**，尚未发送F10，其他片仍NOT_RUN。工具误用要求同一窗口的`QWidget::isAncestorOf`判断顶层Popup归属；纠正为 **QObject所有权 AND 真实菜单action图可达**，foreign popup仍拒绝，真实键盘、ESC、QAccessible、焦点和快照断言均保留，不设置focus/show/trigger来制造通过。[Qt官方定义](https://doc.qt.io/qt-6.8/qwidget.html#isAncestorOf)
+
+原artifact12876289776唯一成功下载170240718 bytes，SHA256
+`221e13e19865e56d3ba34aea86b3a5c20c1171ff64f4dc022f3aea47277c00da`，
+目录`D:/Codex/validation/gsw-ui-upgrade-20261028/forms-c3e-run40823927939/`。
+source-run SHA `99942ba9bdccbff9f1cb1dabcb6ae3790346c8f67516675829bfc5603422d1a3`，
+surface-results SHA `8db538de338b6024fd87ad9e4978325d8e15e84dd3826a8cffc45ba9290bde0a`。
+Root实际查看修复后英文COLMAP图（SHA `dcc478aeffed401e0dbdd5db547806c477a60468a68c970cc249a3ece7593853`）
+和paused/ended观察图（SHA `48b9779d49c4ce3b0bb64a920411d86594c867ed61c14222d531b74941bc66a7`），
+均保留各自c3e身份，不声称完整192格或所有菜单通过。
+
+仓库已改名为`fubukisama/GaussianSplattingWorkbench`，API确认仍是同一不可变ID **1286130219**。
+旧名下载API先返回301，原私有下载器期待直接302而拒绝，未下载到字节；改为先核ID、解析canonical名后才成功取到上述唯一ZIP。
+QA grid guard同样窄改为核不可变ID，其余严格opt-in不变；未改产品machine ID、QSettings或AUMID。
+
+QA修正3899862与独立owner9db10d3安全合并为 **b646ab5f1a4673506dddef15cb815ab903bd8427**、
+tree`cdc2aabbe86f4e2c83955fd93a0b6fdd194fbfa2`；
+[新Forms40828325789](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40828325789)
+只调度一次，原34+新增3项正在验证。原FAIL/NOT_RUN保持不变。独立审查及本机compile-only v19通过，
+但不代表合并后整套产品已接受；c3e完整40823880544、owner9db完整40827898735仍需各自结果，
+最终新包必须对应明确最终整合源，不从旧结果改名继承。
+
 ## 0B. 三处公开界面 RED 已取得，修复候选正在复验
 
 `83ab92b8e5cea54925738f878f1305d1b8372fa0` / run40821180712 最终FAIL，
