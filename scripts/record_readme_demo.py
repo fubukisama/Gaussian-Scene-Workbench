@@ -130,6 +130,11 @@ def json_public(value):
     return {k: v for k, v in value.items() if not k.startswith('_')}
 
 
+def qt_id_matches(actual: str, leaf: str) -> bool:
+    """Qt UIA may expose an objectName with a dotted ancestor prefix."""
+    return actual == leaf or actual.endswith('.' + leaf)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--package-root', type=Path, required=True)
@@ -305,7 +310,7 @@ def main() -> int:
                 for item in candidates:
                     info = item.element_info
                     if (info.process_id != app.pid or not item.is_visible()
-                            or (auto_id and info.automation_id != auto_id)
+                            or (auto_id and not qt_id_matches(info.automation_id, auto_id))
                             or (title and info.name.replace('&', '') != title)
                             or (control_type and info.control_type != control_type)):
                         continue
@@ -433,7 +438,7 @@ def main() -> int:
         return rect
 
     def select_model(snapshot):
-        tree = find(auto_id='projectTree', scope=main_window)
+        tree = find(auto_id='projectTree', control_type='Tree', scope=main_window)
         row = find(title=snapshot['_path'].name, control_type='TreeItem', scope=tree)
         click(row)
         wait_for(lambda: row.is_selected(), 'actual project-tree model selection')
@@ -461,7 +466,7 @@ def main() -> int:
         press(0x0D)
         choice = find(auto_id='sceneImportChoiceDialog')
         click(find(auto_id='replaceSceneButton', scope=choice))
-        wait_for(lambda: not any(w.element_info.automation_id == 'sceneImportChoiceDialog' for w in windows()),
+        wait_for(lambda: not any(qt_id_matches(w.element_info.automation_id, 'sceneImportChoiceDialog') for w in windows()),
                  'replace-current dialog closes')
         select_model(snapshot)
         verify_active_snapshot(save_project(), snapshot, 'actual import and tree selection')
@@ -507,7 +512,7 @@ def main() -> int:
         time.sleep(1.0)
         click(find(auto_id='confirmModelExport', scope=dialog))
         wait_for(lambda: target.is_file() and target.stat().st_size > 128, 'real native export output')
-        wait_for(lambda: not any(w.element_info.automation_id == 'modelExportDialog' for w in windows()),
+        wait_for(lambda: not any(qt_id_matches(w.element_info.automation_id, 'modelExportDialog') for w in windows()),
                  'real export dialog closes')
         last = [None, time.monotonic()]
         def output_settled():
@@ -568,8 +573,7 @@ def main() -> int:
         if (not kernel32.QueryFullProcessImageNameW(wintypes.HANDLE(int(app._handle)), 0, buffer, ctypes.byref(length))
                 or Path(buffer.value).resolve() != exe.resolve()):
             raise RuntimeError('Exact launched PID executable path could not be verified')
-        main_window = wait_for(lambda: next((w for w in windows() if w.element_info.automation_id == 'mainWindow'), None),
-                               'owned native mainWindow', timeout=30)
+        main_window = find(auto_id='mainWindow', control_type='Window', timeout=30)
         hwnd = main_window.handle
         save_uia_tree('initial')
         user32.SetForegroundWindow(hwnd)
