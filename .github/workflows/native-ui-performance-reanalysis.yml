@@ -1,0 +1,130 @@
+name: Native UI Archived Performance Reanalysis
+
+# Read-only replay of the original 24 receipts: no build, GUI, or new timing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  archived-receipts:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GSW_REANALYSIS_ROOT: D:\a\_temp\gsw-ui-archived-reanalysis
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+      - name: Public CLI contracts, without application execution
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_ui_performance.py
+          if ($LASTEXITCODE -ne 0) { throw 'Live performance CLI contract failure.' }
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_reanalyse_native_ui_performance.py
+          if ($LASTEXITCODE -ne 0) { throw 'Archived performance CLI contract failure.' }
+      - name: Download the single immutable original artifact and bind metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GSW_REANALYSIS_HEAD: ${{ github.sha }}
+          GSW_REANALYSIS_RUN: ${{ github.run_id }}
+        shell: pwsh
+        run: |
+          @'
+          import hashlib, json, os
+          from pathlib import Path
+          from urllib.request import Request, build_opener, HTTPRedirectHandler
+          root = Path(os.environ['GSW_REANALYSIS_ROOT'])
+          root.mkdir(parents=True, exist_ok=False)
+          repository = 'fubukisama/Gaussian-Scene-Workbench'
+          run_id, artifact_id = 40663280091, 12806465500
+          source = 'de764f0a5ef3a8e813ec38ed19e3f232e4c83fbe'
+          expected = '80eb95e991828f9ed733539f981925b1bc014323d4f475e443068473acbd3b86'
+          class SafeRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not newurl.startswith('https://'):
+                      raise RuntimeError('Non-HTTPS artifact redirect')
+                  redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+                  if redirected is not None:
+                      redirected.remove_header('Authorization')
+                  return redirected
+          opener = build_opener(SafeRedirect())
+          def fetch(endpoint):
+              request = Request('https://api.github.com/repos/' + repository + endpoint,
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
+              return opener.open(request, timeout=90)
+          def metadata(endpoint, name):
+              with fetch(endpoint) as response:
+                  raw = response.read()
+              (root / name).write_bytes(raw)
+              return json.loads(raw)
+          run = metadata('/actions/runs/' + str(run_id), 'original-run-metadata.json')
+          artifact = metadata('/actions/artifacts/' + str(artifact_id), 'original-artifact-metadata.json')
+          assert run['id'] == run_id and run['head_sha'] == source and run['status'] == 'completed'
+          assert artifact['id'] == artifact_id and artifact['name'] == 'native-ui-performance-40663280091'
+          assert artifact['workflow_run']['id'] == run_id and artifact['workflow_run']['head_sha'] == source
+          assert artifact['expired'] is False and artifact['size_in_bytes'] == 6646944
+          assert artifact['digest'] == 'sha256:' + expected
+          archive = root / 'original-12806465500.zip'
+          with fetch('/actions/artifacts/' + str(artifact_id) + '/zip') as response, archive.open('xb') as stream:
+              while block := response.read(1024 * 1024):
+                  stream.write(block)
+          assert archive.stat().st_size == 6646944
+          assert hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest() == expected
+          binding = {'schema': 'gsw.ui_performance_reanalysis_request/1',
+              'originalRunId': run_id, 'originalArtifactId': artifact_id, 'originalSourceCommit': source,
+              'archiveSha256': expected, 'analysisSourceCommit': os.environ['GSW_REANALYSIS_HEAD'],
+              'analysisRunId': os.environ['GSW_REANALYSIS_RUN'], 'newMeasurementsTaken': False,
+              'applicationExecuted': False, 'fullAcceptance': False,
+              'checkerSha256': hashlib.sha256(Path('scripts/check_native_ui_performance.py').read_bytes()).hexdigest(),
+              'archiveAdapterSha256': hashlib.sha256(Path('scripts/reanalyse_native_ui_performance.py').read_bytes()).hexdigest()}
+          (root / 'reanalysis-request.json').write_text(json.dumps(binding, indent=2) + '\n', encoding='utf-8')
+          '@ | & '${{ steps.qa.outputs.python-path }}' -I -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Original immutable artifact/run binding failed; no substitution or new timing allowed.' }
+      - name: Reanalyse all 24 original receipts using the shared fixed evaluator
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/reanalyse_native_ui_performance.py `
+            --archive "$env:GSW_REANALYSIS_ROOT/original-12806465500.zip" `
+            --expected-archive-sha256 80eb95e991828f9ed733539f981925b1bc014323d4f475e443068473acbd3b86 `
+            --original-run-id 40663280091 --artifact-id 12806465500 `
+            --baseline-commit b0e9fae5c53156b74e247e9c56ab3d0bd1e4a0ff `
+            --candidate-commit de764f0a5ef3a8e813ec38ed19e3f232e4c83fbe `
+            --extract-root "$env:GSW_REANALYSIS_ROOT/original-extracted" `
+            --acceptance "$PWD/docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json" `
+            --plan "$PWD/docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md" `
+            --output "$env:GSW_REANALYSIS_ROOT/reanalysis.json"
+          $analysisExit = $LASTEXITCODE
+          if ($analysisExit -notin @(0,2,3)) { throw 'Reanalysis execution failed.' }
+          $result = Get-Content -Raw -LiteralPath "$env:GSW_REANALYSIS_ROOT/reanalysis.json" | ConvertFrom-Json
+          if ($result.previousResult.sha256 -cne '3831ebe7393f1b2ae89fbae000efb9cefa54fdac9fc67d4e1bb8163855b3f9f4' -or
+              $result.previousResult.status -cne 'FAIL' -or $result.previousResult.reclassified -ne $false -or
+              $result.analysis.rawSummaries.Count -ne 24 -or
+              $result.originalSourceVerification.currentSourceAndBinaryFiles -cne 'NOT_REVERIFIED') {
+            throw 'Original result/read-only source-verification boundary not retained.'
+          }
+          foreach ($metric in @('present_p50_ms','response_p50_ms','present_max_ms','response_max_ms')) {
+            $row = @($result.analysis.comparisons | Where-Object { $_.group -ceq 'medium-dpr1' -and $_.metric -ceq "medium/$metric" })
+            if ($row.Count -ne 1 -or $row[0].status -cne 'INCONCLUSIVE') { throw "Frozen medium noise outcome was lost: $metric" }
+          }
+          # Additional legitimate FAIL/INCONCLUSIVE results are retained. This
+          # workflow's success means data replay completed, never performance PASS.
+          if ($result.status -ceq 'FAIL') { throw 'Reanalysis found a failure; retained evidence is authoritative.' }
+          if ($analysisExit -eq 3) { Write-Output 'Reanalysis completed with retained INCONCLUSIVE metrics; not full performance acceptance.' }
+      - name: Retain original bytes, provenance, and separately identified reanalysis
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-ui-performance-reanalysis-${{ github.run_id }}
+          path: D:/a/_temp/gsw-ui-archived-reanalysis
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 30
