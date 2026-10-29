@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import statistics
 import sys
-from typing import Any
+from typing import Any, Callable, Protocol
 
 
 FROZEN_ACCEPTANCE_SHA256 = "fd80215e7b0bcb48ed28b7c70d1bc7675ddb2e8b18d8cd034f25b5fa27f46376"
@@ -30,6 +30,15 @@ UPLOAD_COUNTERS = ("attributeUploads", "shUploads", "orderUploads")
 
 class ContractError(ValueError):
     pass
+
+
+class ArchivedReceiptReader(Protocol):
+    """Read-only archive adapter; never a substitute for live build validation."""
+
+    def resolve_file(self, declared: str) -> Path: ...
+
+    def import_original_sources(self, manifest: dict[str, Any], acceptance_sha: str,
+                                plan_sha: str) -> tuple[dict[str, Any], str]: ...
 
 
 def require(condition: bool, reason: str) -> None:
@@ -108,7 +117,8 @@ def fixture_parameters(case_id: str) -> dict[str, Any]:
             "scales": 2 if case_id == "2dgs" else 3 if gaussian else 0}
 
 
-def validate_fixture(value: Any, case_id: str, cache: dict[Path, tuple[str, int]]) -> dict[str, Any]:
+def validate_fixture(value: Any, case_id: str, cache: dict[Path, tuple[str, int]],
+                     path_resolver: Callable[[str], Path] = Path) -> dict[str, Any]:
     require(isinstance(value, dict), f"{case_id}: fixture object required")
     if case_id == "empty":
         require(value == {}, "empty scene must not substitute a model fixture")
@@ -117,7 +127,7 @@ def validate_fixture(value: Any, case_id: str, cache: dict[Path, tuple[str, int]
     require(value.get("parameters") == fixture_parameters(case_id), f"{case_id}: fixture parameters changed")
     declared = sha(value.get("sha256"), "fixture.sha256")
     byte_count = integer(value.get("bytes"), "fixture.bytes", 1)
-    path = Path(value.get("path", ""))
+    path = path_resolver(value.get("path", ""))
     require(path.is_absolute() and path.is_file() and not path.is_symlink(), "actual shared fixture required")
     resolved = path.resolve()
     if resolved not in cache:
@@ -317,7 +327,8 @@ def validate_exposure(value: Any, recorded: bool, group: dict[str, Any]) -> None
 
 def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[str, Any],
                      manifest: dict[str, Any], acceptance: dict[str, Any],
-                     fixture_cache: dict[Path, tuple[str, int]], source_identity: dict[str, Any], source_receipt_sha: str) -> dict[str, Any]:
+                     fixture_cache: dict[Path, tuple[str, int]], source_identity: dict[str, Any], source_receipt_sha: str,
+                     fixture_path_resolver: Callable[[str], Path] = Path) -> dict[str, Any]:
     require(report.get("schema") == PROCESS_SCHEMA, "process receipt schema")
     require(report.get("status") in ("RECORDED", "FAIL", "INCONCLUSIVE"), "process status")
     require(report.get("status") != "FAIL" and not report.get("failures"), "producer reported a structural failure")
@@ -378,7 +389,7 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
     for case in cases:
         case_id = case["id"]
         require(case.get("complete") is True, "incomplete case cannot be RECORDED")
-        identity = validate_fixture(case.get("fixture"), case_id, fixture_cache)
+        identity = validate_fixture(case.get("fixture"), case_id, fixture_cache, fixture_path_resolver)
         require(case.get("sourceVertexCount") == (0 if case_id == "empty" else fixture_parameters(case_id)["vertices"]) and
                 case.get("sourceFaceCount") == (2 if case_id == "mesh" else 0), "actual sceneLoaded source counts")
         model_before = validate_model(case.get("modelBefore"), case_id)
@@ -474,7 +485,8 @@ def validate_process(report: dict[str, Any], entry: dict[str, Any], group: dict[
     return result
 
 
-def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) -> dict[str, Any]:
+def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path, *,
+                   archive_reader: ArchivedReceiptReader | None = None) -> dict[str, Any]:
     failures: list[str] = []
     inconclusive: list[str] = []
     comparisons: list[dict[str, Any]] = []
@@ -492,9 +504,13 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
         require(isinstance(manifest.get("runnerId"), str) and bool(manifest["runnerId"]), "manifest runner identity")
         sha(manifest.get("baselineSourceCommit"), "baseline source", 40)
         sha(manifest.get("candidateSourceCommit"), "candidate source", 40)
-        identities, sources_sha = validate_sources(manifest, FROZEN_ACCEPTANCE_SHA256, acceptance["plan_sha256"])
+        identities, sources_sha = (validate_sources(manifest, FROZEN_ACCEPTANCE_SHA256, acceptance["plan_sha256"])
+                                   if archive_reader is None else archive_reader.import_original_sources(
+                                       manifest, FROZEN_ACCEPTANCE_SHA256, acceptance["plan_sha256"]))
         source_provenance = {"arms": identities, "sourcesReceiptSha256": sources_sha,
                              "baselineMeaning": "frozen pre-AA production plus explicit source-bound common QA overlay, not an untouched baseline binary"}
+        if archive_reader is not None:
+            source_provenance["validationMode"] = "ORIGINAL_LIVE_VALIDATION_IMPORTED_NOT_REVERIFIED"
         groups = manifest.get("expectedGroups")
         require(isinstance(groups, list) and len(groups) == len(EXPECTED_COMBINATIONS), "four frozen scenario/DPR groups required")
         require({(g.get("scenario"), g.get("dpr")) for g in groups} == EXPECTED_COMBINATIONS and
@@ -515,12 +531,14 @@ def check_manifest(manifest_path: Path, acceptance_path: Path, plan_path: Path) 
                 if entry.get("timedOut") is True:
                     inconclusive.append(label + ": owned child reached its frozen wall deadline")
                     continue
-                path = Path(entry.get("path", ""))
+                path = (Path(entry.get("path", "")) if archive_reader is None else
+                        archive_reader.resolve_file(entry.get("path", "")))
                 require(path.is_absolute() and path.is_file() and not path.is_symlink(), "real process result file required")
                 require(digest(path) == sha(entry.get("sha256"), "result SHA"), "result file SHA mismatch")
                 report = read_json(path)
                 result = validate_process(report, entry, group_by_id[entry["group"]], manifest, acceptance, fixture_cache,
-                                          identities[entry["arm"]], sources_sha)
+                                          identities[entry["arm"]], sources_sha,
+                                          Path if archive_reader is None else archive_reader.resolve_file)
                 if "exitCode" in entry:
                     require(entry["exitCode"] == (3 if report["status"] == "INCONCLUSIVE" else 0), "exit code/receipt status mismatch")
                 old_exe = exe_by_arm.setdefault(entry["arm"], report["executableSha256"])

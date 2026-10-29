@@ -2,7 +2,9 @@
 #include "InitializationEditor.h"
 #include "AppLanguage.h"
 #include "UiFormVisualProbe.h"
+#include "UiAccessibilityAssertions.h"
 #include <QApplication>
+#include <QDebug>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -92,6 +94,21 @@ int main(int argc,char **argv) {
         fieldRect.right()<inputs->viewport()->width()&&fieldRect.width()>0&&usable;
     }
     check(usable,"all actual initialization fields retain their full horizontal edit area in every language/theme/window size");
+    auto *tabStart=dialog.findChild<QWidget *>(QStringLiteral("initializationKind"));
+    auto *count=dialog.findChild<QLineEdit *>(QStringLiteral("initializationCount"));
+    if(!tabStart||!count){
+      check(false,"actual initialization source and point-count controls exist for accessibility observation");
+      return false;
+    }
+    const QString locale=gsw::AppLanguage::current();
+    const QString expected=locale==QStringLiteral("zh_CN")?QStringLiteral("初始化点数"):
+        locale==QStringLiteral("ja_JP")?QStringLiteral("初期化点数"):QStringLiteral("Initialization Point Count");
+    const auto accessible=gsw::tests::checkAccessibleEditableField(dialog,*tabStart,*count,expected,[&]{
+      return QJsonObject{{"request",dialog.requestDocument()},{"report",dialog.report()},{"running",dialog.isRunning()}};
+    });
+    qInfo().noquote()<<"UI_ACCESSIBLE_FIELD"<<QJsonDocument(accessible.evidence).toJson(QJsonDocument::Compact);
+    check(accessible.passed,"actual point-count field exposes its localized accessible name and is reachable by Tab without changing the public request/report");
+    usable=accessible.passed&&usable;
     return usable;
   };
   auto request=dialog.requestDocument();

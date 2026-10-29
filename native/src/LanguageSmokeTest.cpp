@@ -967,6 +967,20 @@ bool runLanguageFormMatrixSmokeTest(MainWindow &window) {
         {"hasProgressCallback", bool(value.progress)}};
   };
   const QSize standard(1000, 760), narrow(680, 620);
+  const auto reconstructionPathHint = [&] {
+    auto *field = reconstruction.findChild<QLineEdit *>(QStringLiteral("reconstructionExecutable"));
+    const QString locale = AppLanguage::current();
+    const QString expected = locale == QStringLiteral("zh_CN")
+        ? QStringLiteral("选择 COLMAP 可执行文件")
+        : locale == QStringLiteral("ja_JP") ? QStringLiteral("COLMAP 実行ファイルを選択")
+                                           : QStringLiteral("Select COLMAP executable");
+    const bool neutral = field && field->placeholderText() == expected;
+    qInfo().noquote() << "RECONSTRUCTION_PATH_HINT" << locale << "expected" << expected
+                     << "observed" << (field ? field->placeholderText() : QStringLiteral("<missing>"))
+                     << "driveNeutral" << neutral;
+    check(neutral, "COLMAP executable hint is drive-neutral and updates immediately in each language");
+    return neutral;
+  };
   check(tests::captureUiFormMatrix(true, import, QStringLiteral("import-media-request"), standard, narrow, [&] {
     const auto value = import.request();
     return QJsonObject{{"sceneName", value.sceneName}, {"sourcePaths", QJsonArray::fromStringList(value.sourcePaths)},
@@ -980,7 +994,7 @@ bool runLanguageFormMatrixSmokeTest(MainWindow &window) {
         {"mapperMaxRuntimeSeconds", value.mapperMaxRuntimeSeconds}, {"matcherGuided", value.matcherGuided},
         {"useGpu", value.useGpu}, {"singleCamera", value.singleCamera}, {"reset", value.reset},
         {"qualityRecovery", value.qualityRecovery}};
-  }), "reconstruction native matrix retains every public parameter");
+  }, reconstructionPathHint), "reconstruction native matrix retains every public parameter");
   check(tests::captureUiFormMatrix(true, training, QStringLiteral("training-3dgs-request"), standard, narrow,
       [&] { return trainingSnapshot(training); }), "3DGS native matrix retains request and input/output context");
   check(tests::captureUiFormMatrix(true, twoDTraining, QStringLiteral("training-2dgs-request"), standard, narrow,
