@@ -65,6 +65,8 @@ def owned_worker(queue_path, stop_path):
     state = json.loads(queue_path.read_text(encoding="utf-8"))
     if state.get("schema") != "gsw.owned_cpu_queue_fixture/1" or state.get("step") != 0:
         raise ValueError("owned_queue_fixture_required")
+    state["workerIdentity"] = {"selfPid": os.getpid(), "parentPid": os.getppid(),
+        "sysExecutable": sys.executable, "baseExecutable": sys._base_executable}
     events = queue_path.with_suffix(".events.jsonl")
     deadline = time.monotonic() + 50
     with events.open("x", encoding="utf-8", newline="\n") as stream:
@@ -81,6 +83,43 @@ def owned_worker(queue_path, stop_path):
     state["phase"] = "stopped"
     atomic_json(queue_path, state)
     return 0
+
+
+def owned_parent_ids(process_ids):
+    # The documented Toolhelp snapshot is queried only for these known owned
+    # fixture PIDs; never record unrelated process names, paths or arguments.
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateToolhelp32Snapshot(2, 0)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    found = {}
+    try:
+        entry = ProcessEntry()
+        entry.dwSize = ctypes.sizeof(entry)
+        more = kernel.Process32FirstW(handle, ctypes.byref(entry))
+        while more:
+            if entry.th32ProcessID in process_ids:
+                found[str(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                if len(found) == len(process_ids):
+                    break
+            more = kernel.Process32NextW(handle, ctypes.byref(entry))
+        return found
+    finally:
+        kernel.CloseHandle(handle)
 
 
 class LiveUpdate(unittest.TestCase):
@@ -195,6 +234,22 @@ class LiveUpdate(unittest.TestCase):
                 ).splitlines(keepends=True) if line.endswith(b"\n")]
             during = [row for row in rows if install_started <= row["monotonicNs"] <= install_finished]
             self.assertTrue(during, "CPU queue must actually advance while B installs")
+            identity = queue_after.get("workerIdentity", {})
+            reported_pid = identity.get("selfPid")
+            facts = {"schema": "gsw.owned_worker_identity_diagnostic/1", "testOnly": True,
+                "formalGswAcceptance": False, "taskId": task_id,
+                "popenPid": worker.pid, "controllerPid": os.getpid(),
+                "controllerExecutable": sys.executable, "controllerBaseExecutable": sys._base_executable,
+                "workerSelfReport": identity, "eventPids": sorted({row["pid"] for row in rows})}
+            if isinstance(reported_pid, int) and 0 < reported_pid <= 0xFFFFFFFF:
+                facts["osParentIds"] = owned_parent_ids({worker.pid, reported_pid})
+                for name, pid in (("popenProcess", worker.pid), ("reportedWorkerProcess", reported_pid)):
+                    diagnostic = MODULE.ProcessDiagnostic(pid)
+                    try:
+                        facts[name] = diagnostic.snapshot()
+                    finally:
+                        diagnostic.close()
+            MODULE.write_json(ARGS.evidence / "worker-identity-diagnostic.json", facts)
             self.assertTrue(all(row["pid"] == worker.pid and row["taskId"] == task_id for row in rows))
             b_record = helper.launch("B")
             self.assertNotEqual(b_record["pid"], a_record["pid"])

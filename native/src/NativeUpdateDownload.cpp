@@ -19,6 +19,7 @@
 #include <QSslError>
 #include <QSslKey>
 #include <QSslSocket>
+#include <QStorageInfo>
 #include <QTimer>
 
 #ifdef Q_OS_WIN
@@ -30,6 +31,9 @@
 namespace gsw {
 namespace {
 constexpr qint64 maximumArchiveLength = 4LL * 1024 * 1024 * 1024;
+// Match activation's retained operating margin. Downloads temporarily hold
+// both the owned part and QSaveFile's final verified copy, not just one ZIP.
+constexpr qint64 downloadFreeSpaceReserve = 512LL * 1024 * 1024;
 
 QString hostKey(const QString &host) {
   return QString::fromLatin1(QUrl::toAce(host)).toLower();
@@ -310,6 +314,20 @@ public:
     if (!QSslSocket::supportsSsl()) { finish(QStringLiteral("download_tls_unavailable")); return; }
     deadline.start(policy.totalTimeoutMs);
     if (!readResume()) return;
+    // All ancestors have already been checked as ordinary local paths. On
+    // Windows their drive root is the same volume and avoids a long-path API
+    // limit in a storage query for a deeply nested Unicode cache directory.
+#ifdef Q_OS_WIN
+    const auto storagePath = QDir::fromNativeSeparators(request.destinationPath).left(3);
+#else
+    const auto storagePath = QFileInfo(request.destinationPath).absolutePath();
+#endif
+    QStorageInfo storage(storagePath); storage.refresh();
+    const qint64 peakAdditional = (request.expectedLength - bytes) + request.expectedLength;
+    if (!storage.isValid() || !storage.isReady() || storage.isReadOnly() ||
+        storage.bytesAvailable() < peakAdditional + downloadFreeSpaceReserve) {
+      finish(QStringLiteral("download_insufficient_space")); return;
+    }
     if (bytes == request.expectedLength) {
       resumed = true;
       beginVerify();

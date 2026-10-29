@@ -53,7 +53,11 @@ NativeInstallationLock::NativeInstallationLock(const QString &root, const OpenMo
   const auto path = QDir::toNativeSeparators(QDir(m->root).filePath(QStringLiteral(".publish.lock")));
   if (!ordinary(path, mode == OpenMode::CreateIfMissing)) { m->error = QStringLiteral("activation_lock_invalid"); return; }
   const auto apiPath = nativeApiPath(path);
-  m->handle = CreateFileW(reinterpret_cast<LPCWSTR>(apiPath.utf16()), GENERIC_READ | GENERIC_WRITE,
+  // Pure startup admission only needs an existing exclusive read handle.
+  // Requiring write permission here would prevent offline startup from an
+  // otherwise readable installed root. Publishers still require read/write.
+  const DWORD access = mode == OpenMode::RequireExisting ? GENERIC_READ : GENERIC_READ | GENERIC_WRITE;
+  m->handle = CreateFileW(reinterpret_cast<LPCWSTR>(apiPath.utf16()), access,
       0, nullptr, mode == OpenMode::CreateIfMissing ? OPEN_ALWAYS : OPEN_EXISTING,
       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if (m->handle != INVALID_HANDLE_VALUE) {

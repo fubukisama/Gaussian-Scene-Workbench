@@ -1,4 +1,5 @@
 {
+  "磁盘可用空间不足，当前版本未更改。请释放磁盘空间后重试。": {"zh_CN":"磁盘可用空间不足，当前版本未更改。请释放磁盘空间后重试。","en_US":"Not enough free disk space. The current version is unchanged. Free disk space and try again.","ja_JP":"ディスクの空き容量が不足しています。現在のバージョンは変更していません。空き容量を確保して再試行してください。"},
   "版本恢复": {"zh_CN":"版本恢复","en_US":"Version recovery","ja_JP":"バージョンの復元"},
   "当前未选择任何恢复版本。关闭此窗口不会更改安装、工程或训练。": {"zh_CN":"当前未选择任何恢复版本。关闭此窗口不会更改安装、工程或训练。","en_US":"No recovery version is selected. Closing this window does not change the installation, projects, or training.","ja_JP":"復元するバージョンはまだ選択されていません。このウィンドウを閉じても、インストール、プロジェクト、学習は変更されません。"},
   "安装位置：%1": {"zh_CN":"安装位置：%1","en_US":"Installation location: %1","ja_JP":"インストール先：%1"},
