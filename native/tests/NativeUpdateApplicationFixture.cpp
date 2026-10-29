@@ -12,11 +12,18 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPainter>
+#include <QProcess>
 #include <QSaveFile>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 #include "NativeStartupHealth.h"
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifndef GSW_UPDATE_FIXTURE_LABEL
 #error A distinct A/B fixture label is required.
@@ -69,12 +76,70 @@ void trace(const QString &path, const QElapsedTimer &clock, const char *phase,
     file.flush();
   }
 }
+
+int peerProbe(const QString &path, const QElapsedTimer &clock, const QString &window) {
+  // Deliberately a different OS process with a valid inherited one-shot test
+  // capability. This bypasses only the CLIENT's own-window precheck so the
+  // actual SERVER's peer-process check is exercised. No capability is logged.
+  const auto pipeName = qEnvironmentVariable("GSW_NATIVE_STARTUP_PIPE");
+  const auto attempt = qEnvironmentVariable("GSW_NATIVE_STARTUP_ATTEMPT");
+  const auto nonce = qEnvironmentVariable("GSW_NATIVE_STARTUP_NONCE");
+  if (attempt.size() != 32 || nonce.size() != 64 ||
+      pipeName != QStringLiteral("\\\\.\\pipe\\GSW.Startup.") + attempt) return 5;
+  const auto message = QJsonDocument(QJsonObject{{"schema", "gsw.native_startup_ready/1"},
+      {"attemptId", attempt}, {"nonce", nonce}, {"healthScope", "qt-fixture-window-surface"},
+      {"window", window}}).toJson(QJsonDocument::Compact);
+#ifdef Q_OS_WIN
+  const HANDLE pipe = CreateFileW(reinterpret_cast<LPCWSTR>(pipeName.utf16()), GENERIC_WRITE, 0,
+      nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+  trace(path, clock, "peer_probe_connected", {{"pipeOpened", pipe != INVALID_HANDLE_VALUE}});
+  if (pipe == INVALID_HANDLE_VALUE) return 5;
+  const HANDLE completion = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!completion) { CloseHandle(pipe); return 5; }
+  OVERLAPPED operation{}; operation.hEvent = completion;
+  DWORD sent = 0;
+  bool completed = WriteFile(pipe, message.constData(), DWORD(message.size()), &sent, &operation);
+  DWORD error = completed ? ERROR_SUCCESS : GetLastError();
+  if (!completed && error == ERROR_IO_PENDING) {
+    if (WaitForSingleObject(completion, 300) == WAIT_OBJECT_0)
+      completed = GetOverlappedResult(pipe, &operation, &sent, FALSE);
+    else {
+      CancelIoEx(pipe, &operation);
+      GetOverlappedResult(pipe, &operation, &sent, TRUE);
+    }
+    error = completed ? ERROR_SUCCESS : GetLastError();
+  }
+  trace(path, clock, "peer_probe_written", {{"writeCompleted", completed},
+      {"writtenBytes", double(sent)}, {"osError", double(error)}});
+  CloseHandle(completion); CloseHandle(pipe);
+  return 0; // A server rejection/broken pipe is expected, never a retry loop.
+#else
+  Q_UNUSED(message);
+  return 5;
+#endif
+}
 }
 int main(int argc, char **argv) {
   const QString path = qEnvironmentVariable("GSW_UPDATE_FIXTURE_MARKER");
   if (path.isEmpty() || !QDir::isAbsolutePath(path)) return 3;
   QElapsedTimer clock; clock.start();
   trace(path, clock, "main_enter");
+  if (argc == 3 && QByteArray(argv[1]) == "--fixture-health-peer") {
+    QCoreApplication app(argc, argv);
+    return peerProbe(path, clock, QString::fromLatin1(argv[2]));
+  }
+  const QString healthMode = qEnvironmentVariable("GSW_UPDATE_FIXTURE_HEALTH_MODE");
+  if (!QStringList{QString(), QStringLiteral("exit-before-window"), QStringLiteral("normal-exit-no-ack"),
+      QStringLiteral("long-running-no-ack"), QStringLiteral("wrong-peer")}.contains(healthMode)) return 3;
+  if (healthMode == QLatin1String("exit-before-window")) {
+    QCoreApplication app(argc, argv);
+    trace(path, clock, "exit_before_window");
+    return marker(path, {{"schema", "gsw.update_application_fixture/1"}, {"testOnly", true},
+      {"formalGswAcceptance", false}, {"label", QString::fromLatin1(GSW_UPDATE_FIXTURE_LABEL)},
+      {"buildId", QStringLiteral("fixture-") + QString::fromLatin1(GSW_UPDATE_FIXTURE_LABEL).toLower()},
+      {"pid", double(QCoreApplication::applicationPid())}, {"phase", "normal_exit"}, {"exitCode", 0},
+      {"windowShown", false}, {"viewportPainted", false}, {"fixtureHealthMode", healthMode}}) ? 0 : 4;
+  }
   QApplication app(argc, argv);
   trace(path, clock, "application_constructed");
   const QString label = QString::fromLatin1(GSW_UPDATE_FIXTURE_LABEL);
@@ -100,6 +165,7 @@ int main(int argc, char **argv) {
       {"diagnosticsRoot", QDir::fromNativeSeparators(qEnvironmentVariable("GSW_RENDER_DIAGNOSTICS_DIR"))},
       {"qtVersion", QString::fromLatin1(qVersion())},
       {"platform", QGuiApplication::platformName()}};
+  record.insert(QStringLiteral("fixtureHealthMode"), healthMode);
   trace(path, clock, "before_show");
   window.show();
   trace(path, clock, "after_show");
@@ -116,13 +182,31 @@ int main(int argc, char **argv) {
     trace(path, clock, "after_shown_marker", markerDiagnostic);
     if (!written) app.exit(4);
     else {
-      trace(path, clock, "before_health_hook");
-      gsw::reportNativeStartupReady(quintptr(window.winId()), "qt-fixture-window-surface");
-      trace(path, clock, "after_health_hook");
-      QTimer::singleShot(150, &app, [&] {
+      if (healthMode.isEmpty()) {
+        trace(path, clock, "before_health_hook");
+        gsw::reportNativeStartupReady(quintptr(window.winId()), "qt-fixture-window-surface");
+        trace(path, clock, "after_health_hook");
+      } else if (healthMode == QLatin1String("wrong-peer")) {
+        QProcess peer;
+        peer.setProgram(QCoreApplication::applicationFilePath());
+        peer.setArguments({QStringLiteral("--fixture-health-peer"),
+          QString::number(quint64(window.winId()), 16).rightJustified(16, QLatin1Char('0'))});
+        peer.setStandardInputFile(QProcess::nullDevice());
+        peer.setStandardOutputFile(QProcess::nullDevice());
+        peer.setStandardErrorFile(QProcess::nullDevice());
+        qint64 peerPid = 0;
+        const bool started = peer.startDetached(&peerPid);
+        trace(path, clock, "peer_probe_started", {{"started", started}, {"peerPid", double(peerPid)}});
+        if (!started) { app.exit(5); return; }
+      } else trace(path, clock, "health_ack_suppressed");
+      const auto quit = [&] {
         trace(path, clock, "quit_timer");
         app.quit();
-      });
+      };
+      // Fixed, test-only long-running sample. The positive 100/150 ms path,
+      // public 15 s observer and driver's 25 s acceptance deadline are unchanged.
+      if (healthMode == QLatin1String("long-running-no-ack")) QTimer::singleShot(16000, &app, quit);
+      else QTimer::singleShot(150, &app, quit);
     }
   });
   const int result = app.exec();

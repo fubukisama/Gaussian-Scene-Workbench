@@ -3,6 +3,15 @@
 #include "NativeActivationFiles.h"
 #include <QStorageInfo>
 
+#ifdef GSW_ACTIVATION_FAULT_FIXTURE
+// Defined only by the separate, non-installed fault fixture target. Official
+// builds contain neither a callback nor runtime-configurable fault points.
+void gswActivationFixtureCheckpoint(const char *checkpoint);
+#define GSW_ACTIVATION_TEST_POINT(checkpoint) ::gswActivationFixtureCheckpoint(checkpoint)
+#else
+#define GSW_ACTIVATION_TEST_POINT(checkpoint) ((void)0)
+#endif
+
 namespace gsw {
 using namespace activation;
 namespace {
@@ -25,7 +34,9 @@ void pointToSlot(const QString &root, const QString &id, const QString &exeHash)
     ensureDirectory(backups);
     durableWrite(QDir(backups).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".json")), previous, false);
   }
+  GSW_ACTIVATION_TEST_POINT("pointer-before");
   durableWrite(pointer, QByteArray::fromStdString(active.dump()), true);
+  GSW_ACTIVATION_TEST_POINT("pointer-after");
 }
 }
 struct NativeInstallationLock::Impl {
@@ -227,9 +238,11 @@ NativeActivationResult NativeActivationCore::publish(const QString &root, const 
         if (!FlushFileBuffers(reinterpret_cast<HANDLE>(_get_osfhandle(output.handle())))) fail("activation_extract_write_failed");
 #endif
         output.close();
+        GSW_ACTIVATION_TEST_POINT("extract-file-written");
       }
       verifySource(stage, entries, entries[exe].sha256, sourceHash);
       if (!ordinary(slot, true) || !QDir().rename(stage, slot)) fail("activation_slot_exists_or_occupied");
+      GSW_ACTIVATION_TEST_POINT("slot-published");
     }
     // Re-entry after a process failure never overwrites a slot. The exact
     // already-installed file set must independently match this admitted offer.

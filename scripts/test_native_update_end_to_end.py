@@ -165,7 +165,7 @@ class EndToEnd(unittest.TestCase):
         except Exception:
             pass  # Diagnostics must not change the verdict or mask its assertion.
 
-    def launch(self, label, arguments=(), diagnostics=False):
+    def launch(self, label, arguments=(), diagnostics=False, *, health_mode="", marker_path=None):
         launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
         plan = subprocess.run([str(launcher), "--print-launch-plan"], capture_output=True,
             timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -174,9 +174,12 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(planned["valid"])
         build = "fixture-" + label.lower()
         self.assertEqual(planned["version"], build)
-        marker = self.evidence / ("launch-" + label + "-" + uuid.uuid4().hex + ".json")
+        marker = marker_path or self.evidence / ("launch-" + label + "-" + uuid.uuid4().hex + ".json")
         environment = os.environ.copy()
         environment["GSW_UPDATE_FIXTURE_MARKER"] = str(marker)
+        environment.pop("GSW_UPDATE_FIXTURE_HEALTH_MODE", None)
+        if health_mode:
+            environment["GSW_UPDATE_FIXTURE_HEALTH_MODE"] = health_mode
         environment["QT_QPA_PLATFORM"] = "windows"
         environment["GSW_RENDER_DIAGNOSTICS_DIR"] = "unrequested-owned-fixture-diagnostics"
         for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH"):
@@ -242,6 +245,73 @@ class EndToEnd(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+
+    def launch_before_window_exit(self, label, marker):
+        """Actual stable entry creates a process that normally exits before UI."""
+        environment = os.environ.copy()
+        environment["GSW_UPDATE_FIXTURE_MARKER"] = str(marker)
+        environment["GSW_UPDATE_FIXTURE_HEALTH_MODE"] = "exit-before-window"
+        launcher = self.installation / "bin/Gaussian Scene Workbench Launcher.exe"
+        process = subprocess.Popen([str(launcher)], env=environment, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+        child, initial, record = None, {}, {}
+        started = time.monotonic()
+        try:
+            self.assertEqual(process.wait(timeout=15), 0)
+            deadline = time.monotonic() + 25
+            initial = self.startup_diagnostic()
+            attempt = initial.get("attempt", {})
+            if attempt.get("buildId") == "fixture-" + label.lower() and attempt.get("pid"):
+                child = ProcessDiagnostic(int(attempt["pid"]))
+            while time.monotonic() < deadline:
+                if marker.exists():
+                    record = json.loads(marker.read_text(encoding="utf-8"))
+                    if child is None and isinstance(record.get("pid"), (int, float)):
+                        child = ProcessDiagnostic(int(record["pid"]))
+                    if record.get("phase") == "normal_exit":
+                        break
+                time.sleep(.05)
+            self.assertEqual(record.get("schema"), "gsw.update_application_fixture/1")
+            self.assertEqual(record.get("phase"), "normal_exit")
+            self.assertEqual(record.get("label"), label)
+            self.assertEqual(record.get("exitCode"), 0)
+            self.assertIs(record.get("windowShown"), False)
+            self.assertIs(record.get("viewportPainted"), False)
+            self.assertIs(record.get("testOnly"), True)
+            self.assertIs(record.get("formalGswAcceptance"), False)
+            return record
+        finally:
+            self.save_launch_diagnostic(marker, record, process, child, initial, started)
+            if child:
+                child.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+    def wait_fixture_observer(self, marker):
+        rows = [json.loads(line) for line in Path(str(marker) + ".launcher-trace.jsonl").read_text(
+            encoding="utf-8").splitlines() if line.strip()]
+        created = [row for row in rows if row.get("phase") == "helper_created" and row.get("processCreation")]
+        admitted = [row for row in rows if row.get("phase") == "helper_response" and row.get("canonicalCreated")]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(len(admitted), 1)
+        self.assertEqual(admitted[0]["creationResponse"]["code"], "PROCESS_CREATED")
+        helper = ProcessDiagnostic(created[0]["helperPid"])
+        try:
+            before = helper.snapshot()
+            if helper.handle:
+                self.assertEqual(before.get("processCreationTime"), created[0]["helperCreationTime"])
+                if not before["signalled"]:
+                    self.assertEqual(Path(before["image"]).resolve(), self.helper.resolve())
+                # Observe the existing 15 s protocol; this does not extend or
+                # configure its clock, and never terminates either process.
+                self.assertEqual(helper.kernel.WaitForSingleObject(helper.handle, 16000), 0)
+                after = helper.snapshot()
+                self.assertEqual(after.get("exitCode"), 0)
+                return after
+            return {"alreadyExited": True, "helperPid": created[0]["helperPid"]}
+        finally:
+            helper.close()
 
     def refused_launch(self, label):
         """Click only this test-owned launcher's error box, never another app.
@@ -534,6 +604,81 @@ class EndToEnd(unittest.TestCase):
                 "formalGswAcceptance": False, "scope": "qt-fixture-window-surface",
                 "attempt": attempt, "sourceCommit": self.preparation["sourceCommit"],
                 "sourceTree": self.preparation["sourceTree"]})
+        finally:
+            self.installation, self.helper = original_root, original_helper
+
+    def test_health_missing_late_and_wrong_peer_acknowledgements_are_neutral(self):
+        original_root, original_helper = self.installation, self.helper
+        modes = ("exit-before-window", "normal-exit-no-ack", "long-running-no-ack", "wrong-peer")
+        results = []
+        try:
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    root = Path(self.preparation["root"]) / ("neutral-health-" + mode)
+                    root.mkdir()
+                    shutil.copytree(original_root / "bin", root / "bin")
+                    shutil.copytree(original_root / "user-data", root / "user-data")
+                    shutil.copyfile(original_root / "bootstrap.json", root / "bootstrap.json")
+                    self.installation, self.helper = root, root / "bin" / original_helper.name
+                    self.select("B")
+                    self.helper_request("neutral-install-" + mode, "--install", "stable")
+                    pointer = self.active("fixture-b")
+                    protected = {name: tree_hashes(root / name) for name in ("versions", "bin", "user-data", "updates/trust")}
+                    anchor = (root / ".update-trust-anchor").read_bytes()
+                    marker = self.evidence / ("neutral-" + mode + "-" + uuid.uuid4().hex + ".json")
+                    record = (self.launch_before_window_exit("B", marker) if mode == "exit-before-window"
+                        else self.launch("B", health_mode=mode, marker_path=marker))
+                    observer = self.wait_fixture_observer(marker)
+                    status = self.helper_request("neutral-status-" + mode, "--startup-status")[-1]
+                    self.assertEqual(status.get("phase"), "startup_status")
+                    self.assertEqual(status.get("code"), "UNCONFIRMED")
+                    attempt = status["attempt"]
+                    self.assertEqual(attempt["buildId"], "fixture-b")
+                    self.assertEqual(attempt["pid"], record["pid"])
+                    self.assertNotIn("healthScope", attempt)
+                    self.assertNotIn("nonce", attempt)
+                    self.assertNotIn("pipeName", attempt)
+                    diagnostic = json.loads(Path(str(marker) + ".diagnostic.json").read_text(encoding="utf-8"))
+                    child = diagnostic["child"]
+                    self.assertIs(child["opened"], True)
+                    self.assertIs(child["matchesAttemptBirth"], True)
+                    self.assertIs(child["signalled"], True)
+                    self.assertEqual(child["exitCode"], 0)
+                    trace = [json.loads(line) for line in Path(str(marker) + ".trace.jsonl").read_text(
+                        encoding="utf-8").splitlines() if line.strip()]
+                    if mode == "long-running-no-ack":
+                        lifetime_ms = (int(child["processExitTime"], 16) - int(child["processCreationTime"], 16)) / 10000
+                        self.assertGreaterEqual(lifetime_ms, 15000)
+                        self.assertTrue(any(row.get("phase") == "quit_timer" and row["elapsedMs"] >= 15000 for row in trace))
+                    if mode == "wrong-peer":
+                        # The monitor can reject the OS peer before that child
+                        # has appended its final trace row. Read only complete
+                        # lines and await the owned probe's evidence, not ACK.
+                        probe_deadline = time.monotonic() + 2
+                        while time.monotonic() < probe_deadline:
+                            lines = Path(str(marker) + ".trace.jsonl").read_bytes().splitlines(keepends=True)
+                            trace = [json.loads(line) for line in lines if line.endswith(b"\n")]
+                            if any(row.get("phase") == "peer_probe_written" for row in trace):
+                                break
+                            time.sleep(.05)
+                        connected = [row for row in trace if row.get("phase") == "peer_probe_connected" and row.get("pipeOpened")]
+                        self.assertEqual(len(connected), 1)
+                        self.assertNotEqual(connected[0]["pid"], attempt["pid"])
+                        started = [row for row in trace if row.get("phase") == "peer_probe_started" and row.get("started")]
+                        self.assertEqual(len(started), 1)
+                        self.assertEqual(started[0]["peerPid"], connected[0]["pid"])
+                    # Read-only full verification after the observer exits also
+                    # proves no lock/monitor was leaked by a missing ACK.
+                    self.helper_request("neutral-verify-" + mode, "--verify-installed", intent=self.launch_intent())
+                    self.assertEqual(self.active("fixture-b"), pointer)
+                    self.assertEqual((root / ".update-trust-anchor").read_bytes(), anchor)
+                    for name, before in protected.items():
+                        self.assertEqual(tree_hashes(root / name), before)
+                    results.append({"mode": mode, "code": status["code"], "attempt": attempt,
+                        "actualExitCode": child["exitCode"], "observer": observer, "protectedStateUnchanged": True})
+            write_json(self.evidence / "startup-health-neutral-result.json", {"passed": True,
+                "testOnly": True, "formalGswAcceptance": False, "observationWindowMs": 15000,
+                "cases": results, "sourceCommit": self.preparation["sourceCommit"], "sourceTree": self.preparation["sourceTree"]})
         finally:
             self.installation, self.helper = original_root, original_helper
 

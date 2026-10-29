@@ -2,6 +2,7 @@
 
 #include <QFile>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -264,6 +265,109 @@ private slots:
     QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_path_unsafe"));
     QCOMPARE(read(source), before); QVERIFY(!QFileInfo::exists(r.destinationPath));
 #endif
+  }
+  void safelyRestartsAnUnusableResumeResponse_data() {
+    QTest::addColumn<QString>("endpoint");
+    QTest::addColumn<int>("expectedRequests");
+    QTest::newRow("changed-strong-etag") << QStringLiteral("/changed-etag") << 2;
+    QTest::newRow("invalid-content-range") << QStringLiteral("/bad-range") << 2;
+    QTest::newRow("range-ignored-full-200") << QStringLiteral("/range-ignored") << 1;
+  }
+  void safelyRestartsAnUnusableResumeResponse() {
+    QFETCH(QString, endpoint);
+    QFETCH(int, expectedRequests);
+    auto r = request(QStringLiteral("/slow"), QStringLiteral("resume-restart-") + endpoint.mid(1) + QStringLiteral(".bin"));
+    const QByteArray original("original destination is not a download work file");
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write(original), qint64(original.size())); previous.close();
+    const auto currentPath = r.destinationPath + QStringLiteral(".current.json");
+    const QByteArray active("active release remains untouched");
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write(active), qint64(active.size())); current.close();
+    {
+      NativeUpdateDownload first;
+      QSignalSpy done(&first, &NativeUpdateDownload::finished);
+      QObject::connect(&first, &NativeUpdateDownload::progress, &first,
+          [&first](qint64 bytes, qint64) { if (bytes >= 32768) first.cancel(); });
+      QVERIFY(first.start(r, policy()));
+      QVERIFY(done.wait(8000));
+      QVERIFY(qvariant_cast<NativeUpdateDownloadResult>(done.first().first()).cancelled);
+    }
+    const auto prefix = QFileInfo(r.destinationPath + QStringLiteral(".part")).size();
+    QVERIFY(prefix >= 32768 && prefix < r.expectedLength);
+    QCOMPARE(read(r.destinationPath), original);
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    r.url = request(endpoint, QStringLiteral("unused.bin")).url;
+    auto p = policy(); p.maximumAttempts = 2;
+    const auto result = download(r, p);
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QVERIFY(!result.resumed); // No bytes from the rejected 206 may be spliced.
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+    QCOMPARE(read(currentPath), active);
+    QList<QJsonObject> requests;
+    for (const auto &line : read(logPath).mid(previousLogSize).split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (!row.isEmpty()) requests.append(row);
+    }
+    QCOMPARE(requests.size(), qsizetype(expectedRequests));
+    QCOMPARE(requests[0].value("path").toString(), endpoint);
+    QCOMPARE(requests[0].value("range").toString(), QStringLiteral("bytes=%1-").arg(prefix));
+    QCOMPARE(requests[0].value("if_range").toString(), QStringLiteral("\"owned-payload-a\""));
+    if (expectedRequests == 2) {
+      QCOMPARE(requests[1].value("path").toString(), endpoint);
+      QVERIFY(requests[1].value("range").toString().isEmpty());
+      QVERIFY(requests[1].value("if_range").toString().isEmpty());
+    }
+    QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".part")));
+    QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".resume.json")));
+  }
+  void doesNotWaitAnUntrustedDayLongRetryAfterOrChangeExistingFiles() {
+    auto r = request(QStringLiteral("/error429"), QStringLiteral("rate-limit.bin"));
+    const QByteArray original("existing signed package before rate limiting");
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write(original), qint64(original.size())); previous.close();
+    const auto currentPath = r.destinationPath + QStringLiteral(".current.json");
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write(original), qint64(original.size())); current.close();
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto p = policy(); p.maximumAttempts = 2; p.totalTimeoutMs = 1000;
+    QElapsedTimer clock; clock.start();
+    const auto result = download(r, p);
+    QVERIFY(!result.ok);
+    QCOMPARE(result.code, QStringLiteral("download_http_error"));
+    QVERIFY(clock.elapsed() < 3000);
+    QCOMPARE(read(r.destinationPath), original); QCOMPARE(read(currentPath), original);
+    qsizetype requests = 0;
+    for (const auto &line : read(logPath).mid(previousLogSize).split('\n'))
+      if (!QJsonDocument::fromJson(line).object().isEmpty()) ++requests;
+    QVERIFY(requests >= 1 && requests <= p.maximumAttempts);
+  }
+  void rejectsAnUntrustedHttpsCertificateWithoutRetryOrPublication() {
+    auto r = request(QStringLiteral("/payload?test_only_token=never_log_tls_secret"), QStringLiteral("untrusted-tls.bin"));
+    const QByteArray original("existing bytes survive a certificate failure");
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write(original), qint64(original.size())); previous.close();
+    const auto currentPath = r.destinationPath + QStringLiteral(".current.json");
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write(original), qint64(original.size())); current.close();
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto p = policy(); p.sslConfiguration = QSslConfiguration::defaultConfiguration();
+    NativeUpdateDownload client;
+    QSignalSpy done(&client, &NativeUpdateDownload::finished);
+    bool retried = false;
+    QObject::connect(&client, &NativeUpdateDownload::stateChanged, &client,
+        [&](NativeUpdateDownload::State state) { if (state == NativeUpdateDownload::State::RetryWait) retried = true; });
+    QVERIFY(client.start(r, p)); QVERIFY(done.wait(12000));
+    const auto result = qvariant_cast<NativeUpdateDownloadResult>(done.first().first());
+    QVERIFY(!result.ok); QCOMPARE(result.code, QStringLiteral("download_tls_failed"));
+    QVERIFY(!retried); QVERIFY(!result.code.contains(QStringLiteral("never_log_tls_secret")));
+    QCOMPARE(read(r.destinationPath), original); QCOMPARE(read(currentPath), original);
+    QVERIFY(read(logPath).mid(previousLogSize).trimmed().isEmpty()); // TLS must fail before HTTP bytes.
+    QVERIFY(!QFileInfo::exists(r.destinationPath + QStringLiteral(".part")));
   }
 };
 QTEST_GUILESS_MAIN(NativeUpdateDownloadTests)

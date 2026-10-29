@@ -187,6 +187,7 @@ class ActivationInterruptions(unittest.TestCase):
                 process.kill()
                 process.wait(timeout=5)
             reader.join(timeout=2)
+            process.stdout.close()
             (base / "activation-process.log").write_text("".join(lines), encoding="utf-8")
 
     def test_01_killed_during_extraction_preserves_startable_previous_slot(self):

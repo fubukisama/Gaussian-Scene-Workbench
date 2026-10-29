@@ -502,6 +502,9 @@ public:
     if (!alive) return;
     if (token != generation || serial != responseSerial) return;
     if (!active || !reply) return;
+    if (reply->error() == QNetworkReply::RemoteHostClosedError) {
+      retryLater(networkCode(reply->error())); return;
+    }
     if (reply->error() != QNetworkReply::NoError) { finish(networkCode(reply->error())); return; }
     if (!headersAccepted || bytes != request.expectedLength || !part.flush() || part.size() != bytes) {
       finish(QStringLiteral("download_length_mismatch")); return;
