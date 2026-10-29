@@ -455,6 +455,58 @@ def main() -> int:
             visible=state['visible'], reason=reason)
         return state
 
+    def prepare_file_dialog_geometry(region):
+        # Pre-recording UI preparation only: exercise the real file dialog,
+        # resize its exact owned native window, then cancel without importing.
+        # Qt may remember this ordinary dialog geometry for subsequent opens;
+        # the recording guard below remains unchanged and verifies that live.
+        if video_started is not None or guard_thread is not None:
+            raise RuntimeError('File-dialog geometry preparation must precede recording and its guard')
+        project_before = digest(project)
+        log('pre_recording_ui_preparation_started', purpose='fit actual QFileDialog inside capture ROI',
+            business_workflow_acceptance=False)
+        click(find(title='Import Model (PLY / SPZ)', control_type='Button', scope=main_window))
+        dialog = find(auto_id='QFileDialog', title='Import Model (PLY / SPZ)', control_type='Window')
+        dialog_hwnd = dialog.handle
+        if not owned(dialog_hwnd):
+            raise RuntimeError('Pre-recording QFileDialog is not owned by the exact native PID')
+        before = wintypes.RECT()
+        if not user32.GetWindowRect(dialog_hwnd, ctypes.byref(before)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        left, top, width, height = region
+        target_width, target_height = 900, 620
+        target_left = left + (width - target_width) // 2
+        target_top = top + (height - target_height) // 2
+        if not user32.SetWindowPos(dialog_hwnd, 0, target_left, target_top,
+                                   target_width, target_height, 0x0014):  # NOZORDER | NOACTIVATE
+            raise ctypes.WinError(ctypes.get_last_error())
+        observed = wintypes.RECT()
+
+        def prepared_bounds_observed():
+            if not owned(dialog_hwnd):
+                raise RuntimeError('Owned pre-recording QFileDialog disappeared before cancellation')
+            if not user32.GetWindowRect(dialog_hwnd, ctypes.byref(observed)):
+                return False
+            return (observed.left == target_left and observed.top == target_top
+                    and observed.right - observed.left == target_width
+                    and observed.bottom - observed.top == target_height
+                    and observed.left >= left and observed.top >= top
+                    and observed.right <= left + width and observed.bottom <= top + height)
+
+        wait_for(prepared_bounds_observed, 'actual owned QFileDialog outer bounds are 900x620 inside ROI', timeout=5)
+        log('pre_recording_file_dialog_geometry_prepared', pid=app.pid, hwnd=int(dialog_hwnd),
+            before_xyxy=[before.left, before.top, before.right, before.bottom],
+            observed_xyxy=[observed.left, observed.top, observed.right, observed.bottom],
+            business_workflow_acceptance=False)
+        press(0x1B)  # Real Escape cancels the actual dialog; no file is chosen.
+        wait_for(lambda: not any(qt_id_matches(w.element_info.automation_id, 'QFileDialog') for w in windows()),
+                 'pre-recording actual QFileDialog closes after Escape')
+        wait_for(lambda: user32.GetForegroundWindow() == hwnd, 'owned main window regains foreground after cancellation')
+        if digest(project) != project_before:
+            raise RuntimeError('Cancelled pre-recording dialog unexpectedly altered the project file')
+        log('pre_recording_ui_preparation_complete', cancelled_with='Escape', project_file_unchanged=True,
+            purpose='UI geometry preparation, not an import or export success', business_workflow_acceptance=False)
+
     def import_snapshot(snapshot):
         ensure_editing_lock(True, 'snapshot replay/import and subsequent auto-framing')
         click(find(title='Import Model (PLY / SPZ)', control_type='Button', scope=main_window))
@@ -611,6 +663,7 @@ def main() -> int:
             viewport_rect.top - client_origin.y, viewport_rect.right - client_origin.x,
             viewport_rect.bottom - client_origin.y]
         recording_region = [client_origin.x, client_origin.y, 1600, 936]
+        prepare_file_dialog_geometry(recording_region)
         evidence['capture_method'] = 'one continuous FFmpeg gdigrab desktop ROI matching the owned main HWND client rectangle'
         evidence['capture_region_screen_xywh'] = recording_region
         evidence['capture_region_guard'] = {'interval_seconds': .05, 'exact_owned_foreground_pid': app.pid,
