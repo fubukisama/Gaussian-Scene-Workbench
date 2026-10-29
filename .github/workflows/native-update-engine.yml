@@ -13,6 +13,7 @@ on:
       - 'native/recovery/**'
       - 'native/src/NativeRecovery*'
       - 'native/src/AppLanguage*'
+      - 'native/src/NativeStartupHealth*'
       - 'native/i18n/catalog.json'
       - 'native/updater-trust/**'
       - 'native/third_party/tough/**'
@@ -22,6 +23,7 @@ on:
       - 'scripts/prepare_native_update_source.py'
       - 'scripts/package_native_update.py'
       - 'scripts/stage_native_crt.ps1'
+      - 'scripts/native_i18n.py'
       - '.github/workflows/native-update-engine.yml'
 
 # This only produces a default-disabled research-preview engine component.
@@ -103,6 +105,10 @@ jobs:
             fixtureProfileInputPresent=$false;productionProfileInputPresent=$false;fixtureBuild=$false;
             trustLibrary=$library;trustLibrarySha256=(Get-FileHash $library -Algorithm SHA256).Hash.ToLowerInvariant();
             helperSha256=(Get-FileHash $helper -Algorithm SHA256).Hash.ToLowerInvariant();
+            recovery=[ordered]@{path='bin/Gaussian Scene Workbench Recovery.exe';
+              sha256=(Get-FileHash $recovery -Algorithm SHA256).Hash.ToLowerInvariant();fixtureBuild=$false;
+              sourceCommit=(git rev-parse HEAD).Trim();sourceTree=(git rev-parse 'HEAD^{tree}').Trim();
+              capability='entry-only';chooserAcceptance='NOT_RUN'};
             rustc=((& rustup run 1.99.1 rustc --version --verbose) -join "`n");
             cargo=((& rustup run 1.99.1 cargo --version) -join "`n");cmake=((& cmake --version) -join "`n");
             qt=((& windeployqt --version) -join "`n");runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;
@@ -129,6 +135,7 @@ jobs:
             --repository "$PWD" --trust-library D:/gu/engine-production/release/gsw_updater_trust.lib `
             --cmake-cache D:/ge/cpp/CMakeCache.txt --build-executable 'D:/ge/cpp/Release/Gaussian Scene Workbench Update Helper.exe' `
             --recovery-build-executable 'D:/ge/recovery/Release/Gaussian Scene Workbench Recovery.exe' `
+            --recovery-cmake-cache D:/ge/recovery/CMakeCache.txt `
             --toolchain-receipt D:/ge/engine-build.json --cargo-home D:/gu/engine-cargo `
             --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
             --root D:/ge/contract --evidence D:/ge/evidence 2>&1 | Tee-Object D:/ge/evidence/component-contract.log

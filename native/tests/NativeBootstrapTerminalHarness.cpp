@@ -9,6 +9,24 @@
 
 using namespace gsw::bootstrapfixture;
 namespace {
+// Narrow, value-free remote probe. Never serialize exception.what(), handles,
+// SIDs, environment values, credentials, or the private desktop name.
+struct LabDiagnostic {
+  const char *stage = "start";
+  bool childCreated = false, childResumed = false, childTokenValidated = false, childExited = false;
+  DWORD childExitCode = 0;
+  size_t outputBytes = 0;
+  std::string childCode;
+  Json record(DWORD lastOsError) const {
+    Json value{{"probeTag", "BOOTSTRAP-LAB-DIAG-1"}, {"stage", stage}, {"lastOsError", lastOsError},
+        {"childCreated", childCreated}, {"childResumed", childResumed}, {"childTokenValidated", childTokenValidated},
+        {"childExited", childExited}, {"capturedOutputBytes", outputBytes}};
+    if (childExited) value["childExitCode"] = childExitCode;
+    if (!childCode.empty()) value["childResponseCode"] = childCode;
+    return value;
+  }
+} diagnostic;
+void stage(const char *name) { diagnostic.stage = name; SetLastError(ERROR_SUCCESS); }
 struct Algorithm {
   BCRYPT_ALG_HANDLE value = nullptr;
   ~Algorithm() { if (value) BCryptCloseAlgorithmProvider(value, 0); }
@@ -165,10 +183,15 @@ struct OwnedProcess {
   ~OwnedProcess() { if (process && !exited) { TerminateProcess(process.value, 70); WaitForSingleObject(process.value, 5000); } }
 };
 Json runClient(const std::wstring &bootstrap, const std::wstring &destination, const std::wstring &base) {
+  stage("root_acl");
   mediumOwnedDirectory(base);
+  stage("restrict_client_token");
   auto token = restrictedClientToken();
+  stage("private_desktop");
   auto desktop = privateDesktop();
+  stage("client_environment");
   auto environment = clientEnvironment(bootstrap, base);
+  stage("client_pipes");
   SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
   HANDLE reader = nullptr, writer = nullptr;
   need(CreatePipe(&reader, &writer, &inherit, 0) != FALSE, "BOOTSTRAP_LAB_PIPE_FAILED");
@@ -177,6 +200,7 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   Handle childInput(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
   need(bool(childInput), "BOOTSTRAP_LAB_PIPE_FAILED");
   AttributeList list;
+  stage("client_handle_allowlist");
   SIZE_T bytes = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
   need(bytes > 0, "BOOTSTRAP_LAB_PROCESS_FAILED");
@@ -195,10 +219,13 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   start.lpAttributeList = list.value;
   std::wstring arguments = L"\"" + bootstrap + L"\" --install \"" + destination + L"\"";
   PROCESS_INFORMATION information{};
+  stage("create_client_process");
   need(CreateProcessAsUserW(token.value, bootstrap.c_str(), arguments.data(), nullptr, nullptr, TRUE,
       CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), base.c_str(), &start.StartupInfo, &information) != FALSE, "BOOTSTRAP_CLIENT_CREATE_FAILED");
+  diagnostic.childCreated = true;
   OwnedProcess child{Handle(information.hProcess), Handle(information.hThread)};
+  stage("attach_owned_job");
   Handle job(CreateJobObjectW(nullptr, nullptr));
   need(bool(job), "BOOTSTRAP_LAB_JOB_FAILED");
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -206,12 +233,16 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   need(SetInformationJobObject(job.value, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) &&
       AssignProcessToJobObject(job.value, child.process.value), "BOOTSTRAP_LAB_JOB_FAILED");
   HANDLE actualToken = nullptr;
+  stage("verify_suspended_client_token");
   need(OpenProcessToken(child.process.value, TOKEN_QUERY, &actualToken) != FALSE, "BOOTSTRAP_CLIENT_TOKEN_QUERY_FAILED");
   Handle actual(actualToken);
   const auto facts = tokenFacts(actual.value);
   need(ordinaryClient(facts), "BOOTSTRAP_CLIENT_TOKEN_NOT_ORDINARY");
+  diagnostic.childTokenValidated = true;
   childOutput.close(); childInput.close();
+  stage("resume_client");
   need(ResumeThread(child.thread.value) != DWORD(-1), "BOOTSTRAP_CLIENT_RESUME_FAILED");
+  diagnostic.childResumed = true;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
   std::string captured;
   const auto drain = [&] {
@@ -226,20 +257,33 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
       DWORD count = 0;
       need(ReadFile(output.value, block.data(), available, &count, nullptr) != FALSE, "BOOTSTRAP_CLIENT_CAPTURE_FAILED");
       captured.append(block.data(), count);
+      diagnostic.outputBytes = captured.size();
     }
   };
+  stage("capture_client");
   while (std::chrono::steady_clock::now() < deadline) {
     drain();
     if (WaitForSingleObject(child.process.value, 50) == WAIT_OBJECT_0) { child.exited = true; break; }
   }
   need(child.exited, "BOOTSTRAP_CLIENT_DEADLINE");
   drain();
+  stage("read_client_exit");
   DWORD exit = 0;
   need(GetExitCodeProcess(child.process.value, &exit) != FALSE, "BOOTSTRAP_CLIENT_CAPTURE_FAILED");
+  diagnostic.childExited = true;
+  diagnostic.childExitCode = exit;
+  stage("parse_child_response");
   const auto response = Json::parse(captured);
+  if (response.is_object() && response.contains("code") && response["code"].is_string()) {
+    const auto code = response["code"].get<std::string>();
+    if (!code.empty() && code.size() <= 96 && std::all_of(code.begin(), code.end(), [](char c) {
+          return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; })) diagnostic.childCode = code;
+  }
+  stage("validate_child_response");
   need(response.is_object() && response.value("schema", "") == "gsw.bootstrap_fixture_result/1" &&
       response.value("testOnly", false) && response.at("terminalToken") == facts,
       "BOOTSTRAP_CLIENT_RESPONSE_INVALID");
+  stage("client_observed");
   return {{"childExitCode", exit}, {"childResponse", response}, {"terminalToken", facts},
       {"privateDesktop", true}, {"setupLabTokenUsedByClient", false}, {"passwordCreated", false}};
 }
@@ -257,7 +301,9 @@ int wmain(int argc, wchar_t **argv) {
   Json result{{"schema", "gsw.bootstrap_terminal_run/1"}, {"ok", false}, {"testOnly", true},
       {"production", false}, {"authenticodeClaim", false}};
   std::wstring evidence;
+  DWORD diagnosticOsError = ERROR_SUCCESS;
   try {
+    stage("validate_lab_request");
     need(environment(L"GITHUB_ACTIONS") == L"true" && environment(L"RUNNER_OS") == L"Windows", "BOOTSTRAP_REMOTE_LAB_ONLY");
     need(argc == 9, "BOOTSTRAP_LAB_INVALID_REQUEST");
     std::map<std::wstring, std::wstring> options;
@@ -276,12 +322,29 @@ int wmain(int argc, wchar_t **argv) {
     need(image.sha256 == approved, "BOOTSTRAP_SOURCE_IDENTITY_MISMATCH");
     result["bootstrapSha256"] = image.sha256;
     result["sourceAuthority"] = "test-only-out-of-band-ci-artifact-pin";
+    stage("observe_authenticode");
     result["authenticode"] = authenticodeObservation(bootstrap);
     need(result["authenticode"]["status"] == "NOT_SIGNED", "BOOTSTRAP_FIXTURE_IDENTITY_UNEXPECTED");
     result.update(runClient(bootstrap, destination, base));
     result["ok"] = true; result["code"] = "BOOTSTRAP_CLIENT_OBSERVED";
-  } catch (const Failure &error) { result["code"] = error.code; result["systemCode"] = error.systemCode; }
-    catch (...) { result["code"] = "BOOTSTRAP_LAB_FAILED"; }
+  } catch (const Failure &error) {
+    result["code"] = error.code; result["systemCode"] = error.systemCode;
+    result["exceptionKind"] = "native_failure"; diagnosticOsError = error.systemCode;
+  } catch (const std::filesystem::filesystem_error &error) {
+    result["code"] = "BOOTSTRAP_LAB_FAILED"; result["exceptionKind"] = "filesystem_error";
+    result["filesystemErrorValue"] = error.code().value(); diagnosticOsError = DWORD(error.code().value());
+  } catch (const Json::exception &error) {
+    diagnosticOsError = GetLastError(); result["code"] = "BOOTSTRAP_LAB_FAILED";
+    result["exceptionKind"] = "json_exception"; result["jsonExceptionId"] = error.id;
+  } catch (const std::system_error &error) {
+    result["code"] = "BOOTSTRAP_LAB_FAILED"; result["exceptionKind"] = "system_error";
+    result["systemErrorValue"] = error.code().value(); diagnosticOsError = DWORD(error.code().value());
+  } catch (const std::exception &) {
+    diagnosticOsError = GetLastError(); result["code"] = "BOOTSTRAP_LAB_FAILED"; result["exceptionKind"] = "std_exception";
+  } catch (...) {
+    diagnosticOsError = GetLastError(); result["code"] = "BOOTSTRAP_LAB_FAILED"; result["exceptionKind"] = "unknown_exception";
+  }
+  result["labDiagnostic"] = diagnostic.record(diagnosticOsError);
   if (!evidence.empty()) {
     try { receipt(evidence, result); } catch (...) { result["ok"] = false; result["code"] = "BOOTSTRAP_LAB_EVIDENCE_FAILED"; }
   }

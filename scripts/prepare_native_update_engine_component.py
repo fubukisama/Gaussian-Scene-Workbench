@@ -22,6 +22,7 @@ SPEC = importlib.util.spec_from_file_location("gsw_engine_archive", Path(__file_
 PACKAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE)
 HELPER = "bin/Gaussian Scene Workbench Update Helper.exe"
+RECOVERY = "bin/Gaussian Scene Workbench Recovery.exe"
 APP = "bin/Gaussian Scene Workbench.exe"
 SOURCE = "native-update-engine-source/"
 MANIFEST = "native-update-engine-component.json"
@@ -34,7 +35,8 @@ LICENSES = ("COPYING", "LICENSE", "THIRD_PARTY_LICENSES.md", "native/LICENSE.md"
 PROFILE_ENV = ("GSW_UPDATER_FIXTURE_PROFILE_PATH", "GSW_UPDATER_PRODUCTION_PROFILE_PATH")
 META_KEYS = {"schema", "product", "platform", "sourceCommit", "sourceTree", "configurationStatus",
     "publicDistributionReady", "publisherAuthenticated", "fixtureBuild", "minimumBootstrapProtocol",
-    "helperPath", "helperSha256", "trustLibrarySha256", "buildReceiptSha256", "crtReceiptSha256",
+    "helperPath", "helperSha256", "recoveryPath", "recoverySha256", "recoveryCapability", "recoveryChooserAcceptance",
+    "trustLibrarySha256", "buildReceiptSha256", "crtReceiptSha256",
     "sourceManifestSha256", "sourceProvenanceSha256", "files"}
 DELIVERY_KEYS = {"archiveLength", "archiveSha256", "payloadManifestSha256"}
 
@@ -178,12 +180,13 @@ def pe_x64(path: Path):
 
 def runtime_contract(rows: dict):
     folded = {name.casefold(): row for name, row in rows.items()}
-    required = {HELPER.casefold(), "bin/qt6core.dll", "bin/qt6network.dll", "bin/tls/qschannelbackend.dll",
+    required = {HELPER.casefold(), RECOVERY.casefold(), "bin/qt6core.dll", "bin/qt6network.dll", "bin/tls/qschannelbackend.dll",
+        "bin/qt6gui.dll", "bin/qt6widgets.dll", "bin/platforms/qwindows.dll",
         "bin/msvcp140.dll", "bin/msvcp140_1.dll", "bin/msvcp140_2.dll", "bin/vcruntime140.dll", "bin/vcruntime140_1.dll"}
     require(required <= folded.keys(), "ENGINE_RUNTIME_DEPENDENCY_MISSING")
     for name in rows:
         if name.startswith("bin/") and name.casefold().endswith(".exe"):
-            require(name == HELPER, "ENGINE_RUNTIME_EXECUTABLE_FORBIDDEN")
+            require(name in {HELPER, RECOVERY}, "ENGINE_RUNTIME_EXECUTABLE_FORBIDDEN")
 
 
 def validate_build(build: dict, metadata: dict):
@@ -197,6 +200,12 @@ def validate_build(build: dict, metadata: dict):
         "ENGINE_DEFAULT_CONFIGURATION_REQUIRED")
     require(isinstance(build.get("rustc"), str) and build["rustc"].startswith("rustc 1.99.1 ") and
         isinstance(build.get("cargo"), str) and build["cargo"].startswith("cargo 1.99.1 "), "ENGINE_TOOLCHAIN_INVALID")
+    recovery = build.get("recovery")
+    require(isinstance(recovery, dict) and recovery.get("path") == RECOVERY and recovery.get("fixtureBuild") is False and
+        recovery.get("sha256") == metadata.get("recoverySha256") and
+        recovery.get("sourceCommit") == metadata.get("sourceCommit") and recovery.get("sourceTree") == metadata.get("sourceTree") and
+        recovery.get("capability") == "entry-only" and recovery.get("chooserAcceptance") == "NOT_RUN",
+        "ENGINE_RECOVERY_BUILD_IDENTITY_DIFFERS")
 
 
 def validate_crt(crt, rows):
@@ -232,13 +241,17 @@ class SourceZip:
 
 
 def verify_component(repository: Path, archive: Path, metadata: dict):
+    require(isinstance(metadata, dict) and metadata.get("schema") == "gsw.native_update_engine_component/2",
+        "ENGINE_COMPONENT_SCHEMA_UNSUPPORTED")
     require(isinstance(metadata, dict) and set(metadata) == META_KEYS | DELIVERY_KEYS and
-        metadata.get("schema") == "gsw.native_update_engine_component/1" and metadata.get("product") == PACKAGE.PRODUCT and
+        metadata.get("product") == PACKAGE.PRODUCT and
         metadata.get("platform") == "windows-x64" and metadata.get("helperPath") == HELPER and
+        metadata.get("recoveryPath") == RECOVERY and metadata.get("recoveryCapability") == "entry-only" and
+        metadata.get("recoveryChooserAcceptance") == "NOT_RUN" and
         metadata.get("configurationStatus") == "NOT_CONFIGURED" and metadata.get("fixtureBuild") is False and
         metadata.get("minimumBootstrapProtocol") == 2 and metadata.get("publicDistributionReady") is False and
         metadata.get("publisherAuthenticated") is False, "ENGINE_COMPONENT_MANIFEST_INVALID")
-    for key in ("helperSha256", "trustLibrarySha256", "buildReceiptSha256", "crtReceiptSha256", "sourceManifestSha256",
+    for key in ("helperSha256", "recoverySha256", "trustLibrarySha256", "buildReceiptSha256", "crtReceiptSha256", "sourceManifestSha256",
                 "sourceProvenanceSha256", "archiveSha256", "payloadManifestSha256"):
         require(isinstance(metadata.get(key), str) and PACKAGE.SHA256.fullmatch(metadata[key]), "ENGINE_COMPONENT_MANIFEST_INVALID")
     length = metadata.get("archiveLength")
@@ -292,6 +305,7 @@ def verify_component(repository: Path, archive: Path, metadata: dict):
         require(seen == set(expected) | {MANIFEST}, "ENGINE_ARCHIVE_FILE_SET_DIFFERS")
         runtime_contract(hashes)
         require(hashes[HELPER]["sha256"] == metadata["helperSha256"], "ENGINE_BUILD_IDENTITY_DIFFERS")
+        require(hashes[RECOVERY]["sha256"] == metadata["recoverySha256"], "ENGINE_RECOVERY_BUILD_IDENTITY_DIFFERS")
         for name, field in ((BUILD, "buildReceiptSha256"), (CRT, "crtReceiptSha256"),
                             (SOURCE_MANIFEST, "sourceManifestSha256"), (PROVENANCE, "sourceProvenanceSha256")):
             require(name in hashes and hashes[name]["sha256"] == metadata[field], "ENGINE_COMPONENT_MANIFEST_INVALID")
@@ -299,6 +313,12 @@ def verify_component(repository: Path, archive: Path, metadata: dict):
         validate_build(build, metadata)
         require(build.get("cargoFingerprintFeatures") == [] and build.get("cxxCompilerId") == "MSVC" and
             isinstance(build.get("cxxCompilerVersion"), str), "ENGINE_TOOLCHAIN_INVALID")
+        recovery = build["recovery"]
+        require(recovery.get("cmakeSourceDirectory") == "native/recovery" and recovery.get("cxxCompilerId") == "MSVC" and
+            isinstance(recovery.get("cxxCompilerVersion"), str) and recovery.get("cxxCompilerVersion") and
+            recovery.get("builtExecutableSha256") == metadata["recoverySha256"] and
+            all(isinstance(recovery.get(key), str) and PACKAGE.SHA256.fullmatch(recovery[key])
+                for key in ("cmakeCacheSha256", "cxxCompilerIdentificationSha256")), "ENGINE_RECOVERY_PROVENANCE_INVALID")
         validate_crt(PACKAGE._json(captured[CRT]), hashes)
         source = PACKAGE._json(captured[SOURCE_MANIFEST])
         require(isinstance(source, dict) and set(source) == {"schema", "license", "executableSha256", "sourceFileCount", "files"} and
@@ -323,7 +343,8 @@ def verify_component(repository: Path, archive: Path, metadata: dict):
 
 def prepare(args):
     for path in (args.runtime_root, args.repository, args.trust_library, args.cmake_cache, args.build_executable,
-                 args.toolchain_receipt, args.cargo_home, args.work_root, args.output_archive, args.output_manifest):
+                 args.recovery_cmake_cache, args.recovery_build_executable, args.toolchain_receipt,
+                 args.cargo_home, args.work_root, args.output_archive, args.output_manifest):
         local(path)
     fresh(args.work_root)
     fresh(args.output_archive)
@@ -334,7 +355,7 @@ def prepare(args):
     require(command(["git", "-C", args.repository, "rev-parse", "HEAD"]).decode("ascii").strip() == args.source_commit,
         "ENGINE_BUILD_SOURCE_DIFFERS")
     command(["git", "-C", args.repository, "diff", "--exit-code", args.source_commit, "--",
-        "native/src", "native/updater", "native/updater-trust", "native/third_party"])
+        "native/src", "native/updater", "native/recovery", "native/updater-trust", "native/third_party", "native/i18n", "scripts/native_i18n.py"])
     rows = inventory(args.runtime_root)
     runtime_contract(rows)
     require(all(name.startswith("bin/") or name == CRT for name in rows), "ENGINE_RUNTIME_FILE_FORBIDDEN")
@@ -342,6 +363,8 @@ def prepare(args):
         if name.casefold().endswith((".exe", ".dll")):
             pe_x64(args.runtime_root / name)
     require(args.build_executable.name == Path(HELPER).name and digest(args.build_executable) == rows[HELPER]["sha256"], "ENGINE_BUILD_IDENTITY_DIFFERS")
+    require(args.recovery_build_executable.name == Path(RECOVERY).name and
+        digest(args.recovery_build_executable) == rows[RECOVERY]["sha256"], "ENGINE_RECOVERY_BUILD_IDENTITY_DIFFERS")
     require(args.trust_library.name == "gsw_updater_trust.lib" and ordinary(args.trust_library).st_size > 0, "ENGINE_BUILD_IDENTITY_DIFFERS")
     cache_raw = raw(args.cmake_cache)
     cache = dict(match.groups() for line in cache_raw.decode("utf-8").splitlines()
@@ -357,7 +380,8 @@ def prepare(args):
     require((json.loads(features) if isinstance(features, str) else features) == [], "ENGINE_DEFAULT_BUILD_REQUIRED")
     build = decoded(args.toolchain_receipt)
     identity = {"sourceCommit": args.source_commit, "sourceTree": args.source_tree,
-        "helperSha256": rows[HELPER]["sha256"], "trustLibrarySha256": digest(args.trust_library)}
+        "helperSha256": rows[HELPER]["sha256"], "recoverySha256": rows[RECOVERY]["sha256"],
+        "trustLibrarySha256": digest(args.trust_library)}
     validate_build(build, identity)
     compilers = list(fs(args.cmake_cache.parent / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
     require(len(compilers) == 1, "ENGINE_TOOLCHAIN_INVALID")
@@ -369,6 +393,25 @@ def prepare(args):
         "cxxCompilerId": compiler["CMAKE_CXX_COMPILER_ID"], "cxxCompilerVersion": compiler["CMAKE_CXX_COMPILER_VERSION"],
         "cxxCompilerIdentificationSha256": hashlib.sha256(compiler_raw).hexdigest(),
         "configurationEvidence": "explicit-no-default-features-and-fixture-off-build"}
+    recovery_cache_raw = raw(args.recovery_cmake_cache)
+    recovery_cache = dict(match.groups() for line in recovery_cache_raw.decode("utf-8").splitlines()
+        if (match := re.match(r"^([^#/:][^:]*):[^=]+=(.*)$", line)))
+    require(recovery_cache.get("GSW_UPDATER_FIXTURE_BUILD") == "OFF" and
+        Path(recovery_cache.get("CMAKE_HOME_DIRECTORY", "")).absolute() == (args.repository / "native/recovery").absolute(),
+        "ENGINE_RECOVERY_DEFAULT_BUILD_REQUIRED")
+    recovery_compilers = list(fs(args.recovery_cmake_cache.parent / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
+    require(len(recovery_compilers) == 1, "ENGINE_RECOVERY_PROVENANCE_INVALID")
+    recovery_compiler_raw = raw(args.recovery_cmake_cache.parent / "CMakeFiles" /
+        recovery_compilers[0].parent.name / recovery_compilers[0].name)
+    recovery_compiler = dict(re.findall(r'set\((CMAKE_CXX_COMPILER_(?:ID|VERSION)) "([^"]+)"\)', recovery_compiler_raw.decode("utf-8")))
+    require(recovery_compiler.get("CMAKE_CXX_COMPILER_ID") == "MSVC" and recovery_compiler.get("CMAKE_CXX_COMPILER_VERSION"),
+        "ENGINE_RECOVERY_PROVENANCE_INVALID")
+    build["recovery"] = {**build["recovery"], "cmakeSourceDirectory": "native/recovery",
+        "cmakeCacheSha256": hashlib.sha256(recovery_cache_raw).hexdigest(),
+        "cxxCompilerId": recovery_compiler["CMAKE_CXX_COMPILER_ID"],
+        "cxxCompilerVersion": recovery_compiler["CMAKE_CXX_COMPILER_VERSION"],
+        "cxxCompilerIdentificationSha256": hashlib.sha256(recovery_compiler_raw).hexdigest(),
+        "builtExecutableSha256": digest(args.recovery_build_executable)}
     crt = decoded(args.runtime_root / CRT)
     validate_crt(crt, rows)
     fresh(args.work_root, directory=True)
@@ -385,7 +428,10 @@ def prepare(args):
     require(response.get("ok") is True, "ENGINE_SOURCE_PREPARATION_FAILED")
     write(meta / README, ("Native update engine: default NOT_CONFIGURED; research preview only. No publisher authentication or public installation acceptance.\n"
         "原生更新引擎：默认 NOT_CONFIGURED；仅用于研究预览，不代表发布者认证或公开安装验收。\n"
-        "ネイティブ更新エンジン：既定は NOT_CONFIGURED。研究プレビュー専用で、発行元認証・公開インストール受入れを示しません。\n").encode("utf-8"))
+        "ネイティブ更新エンジン：既定は NOT_CONFIGURED。研究プレビュー専用で、発行元認証・公開インストール受入れを示しません。\n"
+        "Recovery is entry-only; trusted-version chooser/rollback UI acceptance is NOT_RUN.\n"
+        "Recovery 仅提供入口；受信版本选择及回退界面验收为 NOT_RUN。\n"
+        "Recovery は入口のみです。信頼済みバージョン選択・ロールバック画面の受入検証は NOT_RUN です。\n").encode("utf-8"))
     mapping = {name: args.runtime_root / name for name in rows}
     mapping.update({SOURCE + name: source / name for name in inventory(source)})
     mapping.update({name: meta / name for name in (BUILD, SOURCE_MANIFEST, PROVENANCE, README)})
@@ -396,9 +442,10 @@ def prepare(args):
         info = ordinary(path)
         files.append({"path": name, "size": info.st_size, "sha256": digest(path)})
     require(len(files) <= PACKAGE.MAX_FILES and sum(row["size"] for row in files) <= PACKAGE.MAX_UNPACKED, "ENGINE_RESOURCE_LIMIT")
-    metadata = {"schema": "gsw.native_update_engine_component/1", "product": PACKAGE.PRODUCT, "platform": "windows-x64",
+    metadata = {"schema": "gsw.native_update_engine_component/2", "product": PACKAGE.PRODUCT, "platform": "windows-x64",
         **identity, "configurationStatus": "NOT_CONFIGURED", "publicDistributionReady": False,
         "publisherAuthenticated": False, "fixtureBuild": False, "minimumBootstrapProtocol": 2, "helperPath": HELPER,
+        "recoveryPath": RECOVERY, "recoveryCapability": "entry-only", "recoveryChooserAcceptance": "NOT_RUN",
         "buildReceiptSha256": digest(meta / BUILD), "crtReceiptSha256": digest(args.runtime_root / CRT),
         "sourceManifestSha256": digest(meta / SOURCE_MANIFEST), "sourceProvenanceSha256": digest(meta / PROVENANCE), "files": files}
     manifest_bytes = encoded(metadata)
@@ -421,7 +468,7 @@ def prepare(args):
     proof = verify_component(args.repository, args.output_archive, metadata)
     write(args.output_manifest, encoded(metadata))
     return {"code": "ENGINE_COMPONENT_PREPARED", "archiveSha256": metadata["archiveSha256"],
-        "helperSha256": identity["helperSha256"], "sourceProof": proof}
+        "helperSha256": identity["helperSha256"], "recoverySha256": identity["recoverySha256"], "sourceProof": proof}
 
 
 def extract(archive, entry, destination: Path, row: dict):
@@ -524,6 +571,8 @@ def merge(args):
         "applicationIdentitySha256": digest(args.application_identity), "engineArchiveSha256": metadata["archiveSha256"],
         "configurationStatus": "NOT_CONFIGURED", "publicDistributionReady": False, "publisherAuthenticated": False,
         "applicationStarted": False, "inputApplicationPreserved": True, "canonicalSourceRebuilt": True,
+        "engineComponentSchema": metadata["schema"], "recoverySha256": metadata["recoverySha256"],
+        "recoveryCapability": "entry-only", "recoveryChooserAcceptance": "NOT_RUN",
         "sharedRuntimeFiles": sorted(shared), "sourceFileCount": len(canonical),
         "sourceManifestSha256": digest(args.output_root / "source-manifest.json"), "sourceProof": proof}
     write(args.output_root / "native-update-engine-merge.json", encoded(receipt))
@@ -535,7 +584,8 @@ def main() -> int:
     commands = parser.add_subparsers(dest="operation", required=True)
     prepare_parser = commands.add_parser("prepare")
     for name in ("runtime-root", "repository", "trust-library", "cmake-cache", "build-executable",
-                 "toolchain-receipt", "cargo-home", "work-root", "output-archive", "output-manifest"):
+                 "recovery-cmake-cache", "recovery-build-executable", "toolchain-receipt", "cargo-home", "work-root",
+                 "output-archive", "output-manifest"):
         prepare_parser.add_argument("--" + name, type=Path, required=True)
     prepare_parser.add_argument("--source-commit", required=True)
     prepare_parser.add_argument("--source-tree", required=True)

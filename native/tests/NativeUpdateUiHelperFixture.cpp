@@ -62,6 +62,15 @@ int main(int argc, char **argv) {
     }
     if (!began) {
       began = true;
+      QFile spaceFault(root.filePath(QString::fromLatin1("ui-fixture-space-next")));
+      if (spaceFault.open(QIODevice::ReadOnly)) {
+        const auto code = QString::fromLatin1(spaceFault.read(128)).trimmed();
+        spaceFault.close(); QFile::remove(spaceFault.fileName());
+        if (code != QLatin1String("download_insufficient_space") && code != QLatin1String("activation_insufficient_space")) {
+          finish(3); return;
+        }
+        emitEvent(QString::fromLatin1("failed"), code); finish(2); return;
+      }
       const auto fault = root.filePath(QString::fromLatin1("ui-fixture-fail-next"));
       if (QFile::exists(fault)) {
         QFile::remove(fault);

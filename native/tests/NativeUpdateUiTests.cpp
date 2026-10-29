@@ -223,6 +223,32 @@ private slots:
     QVERIFY(latestPid() != first);
     QCOMPARE(read(path("current.json")), originalPointer);
   }
+  void insufficientDiskSpaceIsActionableInEachLanguageWithoutRestart_data() {
+    QTest::addColumn<QByteArray>("code");
+    QTest::newRow("download-preflight") << QByteArray("download_insufficient_space");
+    QTest::newRow("activation-preflight") << QByteArray("activation_insufficient_space");
+  }
+  void insufficientDiskSpaceIsActionableInEachLanguageWithoutRestart() {
+    QFETCH(QByteArray, code);
+    open();
+    QVERIFY(write(path("ui-fixture-space-next"), code));
+    QTest::mouseClick(button("nativeUpdateCheck"), Qt::LeftButton);
+    QVERIFY(until([&] { return button("nativeUpdateRetry")->isEnabled(); }));
+    const auto process = latestPid();
+    const auto started = journal(QString::fromLatin1("started")).size();
+    const QMap<QString, QString> expected{
+      {QStringLiteral("zh_CN"), QStringLiteral("磁盘可用空间不足，当前版本未更改。请释放磁盘空间后重试。")},
+      {QStringLiteral("en_US"), QStringLiteral("Not enough free disk space. The current version is unchanged. Free disk space and try again.")},
+      {QStringLiteral("ja_JP"), QStringLiteral("ディスクの空き容量が不足しています。現在のバージョンは変更していません。空き容量を確保して再試行してください。")}};
+    for (auto it = expected.cbegin(); it != expected.cend(); ++it) {
+      QVERIFY(AppLanguage::apply(it.key(), false));
+      QCOMPARE(status()->text(), it.value());
+      QCOMPARE(status()->textFormat(), Qt::PlainText);
+      QCOMPARE(latestPid(), process);
+      QCOMPARE(journal(QString::fromLatin1("started")).size(), started);
+    }
+    QCOMPARE(read(path("current.json")), originalPointer);
+  }
   void thirtySecondBackgroundCheckNeverCreatesADialogOrTakesTheForeground() {
     QVERIFY(!dialog());
     auto *active = QApplication::activeWindow();

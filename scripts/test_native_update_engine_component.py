@@ -71,6 +71,9 @@ def merge_contract(args, archive: Path, manifest: Path, metadata: dict) -> None:
     assert receipt["publisherAuthenticated"] is False and receipt["publicDistributionReady"] is False
     assert response["mergeReceipt"]["inputApplicationPreserved"] is True
     assert sha(merged / "bin/Gaussian Scene Workbench.exe") == sha(app)
+    assert sha(merged / "bin" / RECOVERY) == metadata["recoverySha256"]
+    assert receipt["engineComponentSchema"] == "gsw.native_update_engine_component/2"
+    assert receipt["recoveryCapability"] == "entry-only" and receipt["recoveryChooserAcceptance"] == "NOT_RUN"
     assert tree_hashes(original) == before
     canonical_rows = {row["path"][len("native-update-engine-source/"):]: row for row in metadata["files"]
         if row["path"].startswith("native-update-engine-source/")}
@@ -111,7 +114,7 @@ def merge_contract(args, archive: Path, manifest: Path, metadata: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("runtime-root", "repository", "trust-library", "cmake-cache", "build-executable",
-                 "recovery-build-executable", "toolchain-receipt", "cargo-home", "root", "evidence"):
+                 "recovery-build-executable", "recovery-cmake-cache", "toolchain-receipt", "cargo-home", "root", "evidence"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-tree", required=True)
@@ -132,7 +135,7 @@ def main() -> int:
     archive, manifest = output / "native-update-engine-windows-x64.zip", output / "native-update-engine-component.json"
     command = [sys.executable, "-I", "-B", str(args.repository / "scripts/prepare_native_update_engine_component.py"), "prepare"]
     for name in ("runtime-root", "repository", "trust-library", "cmake-cache", "build-executable",
-                 "toolchain-receipt", "cargo-home", "source-commit", "source-tree"):
+                 "recovery-build-executable", "recovery-cmake-cache", "toolchain-receipt", "cargo-home", "source-commit", "source-tree"):
         command.extend(["--" + name, str(getattr(args, name.replace("-", "_")))])
     command.extend(["--work-root", str(args.root / "component"), "--output-archive", str(archive),
                     "--output-manifest", str(manifest)])
@@ -145,15 +148,44 @@ def main() -> int:
     assert result.returncode == 0 and response.get("ok") is True, response
     assert archive.is_file() and manifest.is_file(), response
     record = json.loads(manifest.read_bytes())
-    assert record["schema"] == "gsw.native_update_engine_component/1", record
+    assert record["schema"] == "gsw.native_update_engine_component/2", record
     assert record["sourceCommit"] == args.source_commit and record["sourceTree"] == args.source_tree
     assert record["configurationStatus"] == "NOT_CONFIGURED" and record["publicDistributionReady"] is False
     assert record["fixtureBuild"] is False and record["publisherAuthenticated"] is False
     assert record["recoveryPath"] == "bin/" + RECOVERY and record["recoverySha256"] == sha(recovery)
+    assert record["recoveryCapability"] == "entry-only" and record["recoveryChooserAcceptance"] == "NOT_RUN"
+    # Historical helper-only /1 is not silently accepted as the Recovery suite.
+    legacy = {key: value for key, value in record.items() if key not in {
+        "recoveryPath", "recoverySha256", "recoveryCapability", "recoveryChooserAcceptance"}}
+    legacy["schema"] = "gsw.native_update_engine_component/1"
+    legacy_manifest = args.root / "historical-helper-only-v1.json"
+    write_json(legacy_manifest, legacy)
+    cli(args, "reject-historical-component-v1", "verify", "--repository", args.repository,
+        "--archive", archive, "--manifest", legacy_manifest, ok=False, code="ENGINE_COMPONENT_SCHEMA_UNSUPPORTED")
+    for name, replacement, code in (("cache-source", args.cmake_cache, "ENGINE_RECOVERY_DEFAULT_BUILD_REQUIRED"),
+            ("build-executable", args.build_executable, "ENGINE_RECOVERY_BUILD_IDENTITY_DIFFERS")):
+        rejected = list(command[5:])
+        option = "--recovery-cmake-cache" if name == "cache-source" else "--recovery-build-executable"
+        rejected[rejected.index(option) + 1] = str(replacement)
+        rejected_root = args.root / ("must-not-create-recovery-" + name)
+        rejected[rejected.index("--work-root") + 1] = str(rejected_root)
+        rejected_archive = args.root / ("must-not-create-recovery-" + name + ".zip")
+        rejected[rejected.index("--output-archive") + 1] = str(rejected_archive)
+        rejected_manifest = args.root / ("must-not-create-recovery-" + name + ".json")
+        rejected[rejected.index("--output-manifest") + 1] = str(rejected_manifest)
+        cli(args, "reject-recovery-" + name, "prepare", *rejected, ok=False, code=code)
+        assert not rejected_root.exists() and not rejected_archive.exists() and not rejected_manifest.exists()
     with zipfile.ZipFile(archive) as payload:
         names = payload.namelist()
         assert "bin/" + HELPER in names
         assert "bin/" + RECOVERY in names
+        build_record = json.loads(payload.read("native-update-engine-build.json"))
+        assert build_record["recovery"]["sha256"] == record["recoverySha256"]
+        assert build_record["recovery"]["builtExecutableSha256"] == record["recoverySha256"]
+        assert build_record["recovery"]["fixtureBuild"] is False
+        assert build_record["recovery"]["cmakeSourceDirectory"] == "native/recovery"
+        assert build_record["recovery"]["sourceCommit"] == args.source_commit
+        assert build_record["recovery"]["sourceTree"] == args.source_tree
         assert "bin/Qt6Widgets.dll" in names and "bin/Qt6Gui.dll" in names and "bin/platforms/qwindows.dll" in names
         assert "bin/Qt6Core.dll" in names and "bin/Qt6Network.dll" in names
         assert "bin/tls/qschannelbackend.dll" in names
@@ -210,10 +242,13 @@ def main() -> int:
         "mergeScope": "non-executable-owned-app-fixture-only", "originalApplicationArtifactPreserved": True,
         "contracts": ["official-default-helper", "NOT_CONFIGURED", "whole-component-zip", "exact-git-and-raw-crate-source",
             "official-recovery-presence-and-identity", "recovery-unsafe-cli-rejected",
+            "recovery-independent-cmake-source", "recovery-built-executable-bound", "historical-helper-only-v1-refused",
             "canonical-source-rebuild", "matching-runtime-shared", "conflicting-runtime-refused", "wrong-source-refused",
             "tampered-archive-refused", "fresh-output-only"],
         "archiveSha256": sha(archive), "componentManifestSha256": sha(manifest), "helperSha256": sha(helper),
-        "recoverySha256": sha(recovery), "guiRecoveryAcceptance": False})
+        "recoverySha256": sha(recovery), "guiRecoveryAcceptance": False,
+        "componentSchema": "gsw.native_update_engine_component/2", "recoveryCapability": "entry-only",
+        "recoveryChooserAcceptance": "NOT_RUN"})
     print("Native update engine component contract PASS (default NOT_CONFIGURED only).")
     return 0
 

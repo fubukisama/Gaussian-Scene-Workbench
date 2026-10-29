@@ -215,6 +215,7 @@ private:
     mRunning->setText(text(AppLanguage::source("正在运行的构建：%1")).arg(mRoot.isEmpty() ? text(AppLanguage::source("开发构建（未托管安装）")) : mRunningBuild));
     QString status;
     if (mCode == QLatin1String("NOT_CONFIGURED")) status = text(AppLanguage::source("尚未配置生产更新信任；不会接受未签名更新。"));
+    else if (mCode == QLatin1String("download_insufficient_space") || mCode == QLatin1String("activation_insufficient_space")) status = text(AppLanguage::source("磁盘可用空间不足，当前版本未更改。请释放磁盘空间后重试。"));
     else if (mCode == QLatin1String("BOOTSTRAP_REQUIRED") || mCode == QLatin1String("activation_bootstrap_migration_required")) status = text(AppLanguage::source("需要使用可信安装器升级启动组件；当前程序和工程未改变。"));
     else if (mPhase == QLatin1String("failed")) status = text(AppLanguage::source("更新未完成或尚未确认（%1）。当前窗口与工程不受影响，请重新检查更新状态。")).arg(mCode);
     else if (mPhase == QLatin1String("checking")) status = text(AppLanguage::source("正在检查已签名的更新信息…"));
