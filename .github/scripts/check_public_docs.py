@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from html.parser import HTMLParser
+import hashlib
 import json
 from pathlib import Path
 import posixpath
@@ -137,6 +138,47 @@ def link_destination(target, html_attribute=False):
     return target
 
 
+def check_readme_media(tracked):
+    """Bind published PNG bytes to the documented source; not visual acceptance."""
+    relative = "docs/images/readme/manifest.json"
+    try:
+        manifest = json.loads((ROOT / relative).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as error:
+        return [f"README media manifest is unavailable: {error}"], 0
+    errors = []
+    if (manifest.get("schema") != "gsw.readme_media/1" or
+            not re.fullmatch(r"[0-9a-f]{40}", manifest.get("sourceCommit", "")) or
+            manifest.get("rawUnedited") is not True or
+            manifest.get("syntheticInputs") is not True or
+            any(manifest.get(key) is not False for key in (
+                "videoRecording", "trainingExecutionDemonstrated",
+                "currentNativeDeliveryAcceptance", "reconstructionQualityEvidence"))):
+        errors.append("README media source/claim boundary is invalid")
+    images = manifest.get("images", [])
+    expected = {(locale, purpose) for locale in ("en_US", "zh_CN", "ja_JP")
+                for purpose in ("import", "initialization", "training-3dgs", "training-2dgs", "export")}
+    actual = {(entry.get("locale"), entry.get("purpose")) for entry in images}
+    if len(images) != len(expected) or actual != expected:
+        errors.append("README media must cover all five views in all three languages")
+    seen = set()
+    for entry in images:
+        path = entry.get("path", "")
+        selected = (ROOT / path).resolve()
+        if (path in seen or path not in tracked or not path.startswith("docs/images/readme/") or
+                not path.endswith(".png") or not selected.is_relative_to(ROOT) or not selected.is_file()):
+            errors.append(f"README media path is missing, duplicate or unpublished: {path}")
+            continue
+        seen.add(path)
+        data = selected.read_bytes()
+        if len(data) != entry.get("bytes") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+            errors.append(f"README media file binding mismatch: {path}")
+        if (len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or
+                int.from_bytes(data[16:20], "big") != entry.get("width") or
+                int.from_bytes(data[20:24], "big") != entry.get("height")):
+            errors.append(f"README media PNG dimensions/header mismatch: {path}")
+    return errors, len(images)
+
+
 def check_document(relative, tracked=None):
     if tracked is None:tracked=tracked_files()
     path = ROOT / relative
@@ -259,9 +301,12 @@ def main():
         references += count
         findings.extend({"path": relative, "message": error} for error in errors)
     findings.extend({"path": "LICENSE", "message": error} for error in plain_license_errors((ROOT / "LICENSE").read_text(encoding="utf-8")))
+    media_errors, media_count = check_readme_media(tracked)
+    findings.extend({"path": "docs/images/readme/manifest.json", "message": error} for error in media_errors)
     report = {"checkedMarkdownFiles": len(paths), "checkedLinkReferences": references,
               "plainTextLicenseChecked": True, "publishedTargetInventoryChecked":True, "standardGplTextReformatted": False,
               "linkedOverviewBadgesChecked": True,
+              "readmeMediaFilesChecked": media_count,
               "findings": findings, "passed": not findings}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

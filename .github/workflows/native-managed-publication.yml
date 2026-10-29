@@ -1,0 +1,175 @@
+name: Native Managed Publication
+
+# This is the unchanged PowerShell adapter's private byte/shortcut fixture,
+# not full application, updater-network, installer or product acceptance.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-managed-publication.yml'
+      - '.github/workflows/native-windows.yml'
+      - 'native/CMakeLists.txt'
+      - 'native/updater-developer/**'
+      - 'native/src/NativeLauncher.cpp'
+      - 'native/src/NativeInstallation.*'
+      - 'native/src/NativeUpdateLocalPath.h'
+      - 'native/src/NativeDeveloperPublisher*'
+      - 'native/src/NativeActivationCore.*'
+      - 'native/tests/NativeShortcutFixture.cpp'
+      - 'native/third_party/miniz/**'
+      - 'native/third_party/nlohmann/**'
+      - 'scripts/test_native_installation.ps1'
+      - 'scripts/publish_native_installation.ps1'
+      - 'scripts/write_native_release_manifest.ps1'
+      - 'scripts/package_native_update.py'
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-adapter:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-managed-publication
+      - name: Create fresh owned build and evidence directories
+        shell: pwsh
+        run: |
+          $base=if(Test-Path -LiteralPath 'D:/'){'D:/gmp'}else{Join-Path $env:RUNNER_TEMP 'gmp'}
+          $root=Join-Path $base ($env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)
+          if(Test-Path -LiteralPath $root){throw 'Preserving an existing publication fixture root.'}
+          New-Item -ItemType Directory -Path "$root/evidence","$root/runtime","$root/vcpkg-cache","$root/tmp" | Out-Null
+          $env:TEMP="$root/tmp"; $env:TMP=$env:TEMP
+          "GSW_MANAGED_FIXTURE_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TEMP=$root/tmp" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$root/tmp" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$root/vcpkg-cache" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          [ordered]@{schema='gsw.managed_publication_fixture_source/1';sourceCommit=$env:GITHUB_SHA;
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;
+            scope='unchanged-powershell-adapter-private-fixture';formalGswAcceptance=$false;
+            applicationBuildRequested=$false;applicationExecutionRequested=$false;
+            scriptSha256=(Get-FileHash scripts/test_native_installation.ps1).Hash.ToLowerInvariant()} |
+            ConvertTo-Json -Depth 5 | Set-Content "$root/evidence/source.json" -Encoding utf8
+      - name: Prepare only the native CMake configuration dependencies on D
+        shell: pwsh
+        run: |
+          $root=$env:GSW_MANAGED_FIXTURE_ROOT
+          & '${{ steps.qa.outputs.python-path }}' -m venv "$root/qa"
+          if($LASTEXITCODE -ne 0){throw 'Owned QA Python environment creation failed.'}
+          $python="$root/qa/Scripts/python.exe"
+          & $python -m pip install --cache-dir "$root/pip-cache" `
+            --constraint scripts/requirements-native-checks.txt numpy Pillow
+          if($LASTEXITCODE -ne 0){throw 'Native CMake NumPy/Pillow dependencies failed.'}
+          "GSW_MANAGED_QA_PYTHON=$python" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Configure native targets and build only launcher and shortcut fixture
+        shell: pwsh
+        run: |
+          $root=$env:GSW_MANAGED_FIXTURE_ROOT
+          $deps=Join-Path $root 'deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$deps/installed" "--x-buildtrees-root=$deps/buildtrees" `
+            "--x-packages-root=$deps/packages" "--downloads-root=$deps/downloads" 2>&1 |
+            Tee-Object -FilePath "$root/evidence/codecs.log"
+          if($LASTEXITCODE -ne 0){throw 'Native CMake codec configure dependencies failed.'}
+          cmake -S native -B "$root/launcher-build" -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=ON '-DCMAKE_CXX_FLAGS=/MP2' `
+            "-DPython3_EXECUTABLE=$env:GSW_MANAGED_QA_PYTHON" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md 2>&1 |
+            Tee-Object -FilePath "$root/evidence/launcher-configure.log"
+          if($LASTEXITCODE -ne 0){throw 'Native launcher/shortcut configure failed.'}
+          cmake --build "$root/launcher-build" --config Release --parallel 2 `
+            --target GaussianSceneWorkbenchLauncher gsw_native_shortcut_fixture 2>&1 |
+            Tee-Object -FilePath "$root/evidence/launcher-build.log"
+          if($LASTEXITCODE -ne 0){throw 'Native launcher/shortcut fixture build failed.'}
+          if(Test-Path -LiteralPath "$root/launcher-build/Release/Gaussian Scene Workbench.exe"){
+            throw 'This focused gate must not build the desktop application.'
+          }
+      - name: Build the separate private developer publisher
+        shell: pwsh
+        run: |
+          $root=$env:GSW_MANAGED_FIXTURE_ROOT
+          cmake -S native/updater-developer -B "$root/developer-build" `
+            -G 'Visual Studio 17 2022' -A x64 2>&1 |
+            Tee-Object -FilePath "$root/evidence/developer-configure.log"
+          if($LASTEXITCODE -ne 0){throw 'Standalone developer publisher configure failed.'}
+          cmake --build "$root/developer-build" --config Release --parallel 2 `
+            --target gsw_native_developer_publisher 2>&1 |
+            Tee-Object -FilePath "$root/evidence/developer-build.log"
+          if($LASTEXITCODE -ne 0){throw 'Standalone developer publisher build failed.'}
+          windeployqt --release --no-translations --compiler-runtime `
+            "$root/developer-build/Release/GSW Native Developer Publisher.exe" 2>&1 |
+            Tee-Object -FilePath "$root/evidence/developer-runtime.log"
+          if($LASTEXITCODE -ne 0){throw 'Private developer publisher runtime deployment failed.'}
+      - name: Prepare the launcher-only runtime and bind fixture tool hashes
+        shell: pwsh
+        run: |
+          $root=$env:GSW_MANAGED_FIXTURE_ROOT
+          $launcher="$root/launcher-build/Release/Gaussian Scene Workbench Launcher.exe"
+          $shortcut="$root/launcher-build/Release/gsw_native_shortcut_fixture.exe"
+          $publisher="$root/developer-build/Release/GSW Native Developer Publisher.exe"
+          Copy-Item -LiteralPath $launcher -Destination "$root/runtime/Gaussian Scene Workbench Launcher.exe"
+          windeployqt --release --no-translations --compiler-runtime `
+            "$root/runtime/Gaussian Scene Workbench Launcher.exe" 2>&1 |
+            Tee-Object -FilePath "$root/evidence/launcher-runtime.log"
+          if($LASTEXITCODE -ne 0){throw 'Launcher-only runtime deployment failed.'}
+          if(Test-Path -LiteralPath "$root/runtime/Gaussian Scene Workbench.exe"){
+            throw 'The runtime fixture must not include a real desktop application.'
+          }
+          [ordered]@{schema='gsw.managed_publication_fixture_tools/1';
+            launcherSha256=(Get-FileHash -LiteralPath $launcher).Hash.ToLowerInvariant();
+            shortcutFixtureSha256=(Get-FileHash -LiteralPath $shortcut).Hash.ToLowerInvariant();
+            developerPublisherSha256=(Get-FileHash -LiteralPath $publisher).Hash.ToLowerInvariant();
+            requestedTargets=@('GaussianSceneWorkbenchLauncher','gsw_native_shortcut_fixture','gsw_native_developer_publisher');
+            desktopApplicationBuilt=$false;desktopApplicationExecuted=$false} |
+            ConvertTo-Json -Depth 5 | Set-Content "$root/evidence/tools.json" -Encoding utf8
+      - name: Execute the unchanged five-parameter PowerShell adapter contract
+        shell: pwsh
+        run: |
+          $root=$env:GSW_MANAGED_FIXTURE_ROOT
+          $env:PATH="$root/runtime;$env:PATH"
+          $before=(Get-FileHash scripts/test_native_installation.ps1).Hash.ToLowerInvariant()
+          ./scripts/test_native_installation.ps1 -RuntimeDirectory "$root/runtime" `
+            -ShortcutFixture "$root/launcher-build/Release/gsw_native_shortcut_fixture.exe" `
+            -TestRoot "$root/contracts" `
+            -DeveloperPublisher "$root/developer-build/Release/GSW Native Developer Publisher.exe" `
+            -PythonExecutable $env:GSW_MANAGED_QA_PYTHON 2>&1 |
+            Tee-Object -FilePath "$root/evidence/adapter.log"
+          $receipt=Get-Content -LiteralPath "$root/contracts/acceptance.json" -Raw | ConvertFrom-Json
+          if($receipt.schema -cne 'gsw.native_installation_test/1' -or -not $receipt.accepted -or
+             $receipt.formalGswAcceptance -ne $false -or $receipt.realUserApplicationsStarted -ne 0 -or
+             $receipt.realUserApplicationsStopped -ne 0){throw 'Private PowerShell adapter acceptance is missing or invalid.'}
+          if((Get-FileHash scripts/test_native_installation.ps1).Hash.ToLowerInvariant() -cne $before){
+            throw 'The accepted PowerShell adapter was modified during the gate.'
+          }
+          # Expected corruption/refusal cases are checked inside the unchanged
+          # adapter. A successful private acceptance must not leak a native
+          # child exit status into the outer Actions PowerShell wrapper.
+          exit 0
+      - name: Retain only bounded fixture receipts and logs
+        if: always() && env.GSW_MANAGED_FIXTURE_ROOT != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-managed-publication-evidence
+          path: |
+            ${{ env.GSW_MANAGED_FIXTURE_ROOT }}/evidence/
+            ${{ env.GSW_MANAGED_FIXTURE_ROOT }}/contracts/**/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

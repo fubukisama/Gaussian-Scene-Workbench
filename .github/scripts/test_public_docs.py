@@ -1,5 +1,7 @@
 """Remote regression checks for actual overview navigation and showcase guards."""
 from pathlib import Path
+import json
+import re
 import unittest
 from unittest.mock import patch
 
@@ -29,13 +31,22 @@ class OverviewChecks(unittest.TestCase):
         self.assertTrue(any("missing heading: #why-gsw" in error for error in self.findings(source)))
 
     def test_folded_showcase_is_not_an_unfolded_example(self):
-        image = next(line for line in self.source.splitlines()
-                     if line.startswith("![") and "docs/images/" in line)
-        source = self.source.replace(image, "<details>\n<summary>Example</summary>\n\n" + image + "\n\n</details>", 1)
+        pattern = r'!\[[^\]]*\]\(docs/images/[^)]+\)|<img\b[^>]*src="docs/images/[^>]+>'
+        def fold(match):
+            return "<details>\n<summary>Example</summary>\n\n" + match[0] + "\n\n</details>"
+        source, count = re.subn(pattern, fold, self.source)
+        self.assertGreater(count, 0)
         self.assertTrue(any("outside folded details" in error for error in self.findings(source)))
 
+    def test_gallery_can_keep_some_images_folded(self):
+        pattern = r'<img\b[^>]*src="docs/images/[^>]+>'
+        source, count = re.subn(pattern,
+            lambda match: "<details>\n<summary>Example</summary>\n" + match[0] + "\n</details>",
+            self.source, count=1)
+        self.assertEqual(count, 1)
+        self.assertEqual(self.findings(source), [])
+
     def test_image_alt_is_required(self):
-        import re
         source, count = re.subn(r"!\[[^\]]+\]\((docs/images/[^)]+)\)", r"![](\1)", self.source, count=1)
         self.assertEqual(count, 1)
         self.assertTrue(any("image has no alt text" in error for error in self.findings(source)))
@@ -43,6 +54,21 @@ class OverviewChecks(unittest.TestCase):
     def test_badge_destination_remains_actionable(self):
         source = self.source.replace("README_RELEASE.md#download-the-preview", "README_RELEASE.md#missing", 1)
         self.assertTrue(any("native_preview badge must link" in error for error in self.findings(source)))
+
+    def test_actual_media_bindings(self):
+        self.assertEqual(docs.check_readme_media(self.tracked), ([], 15))
+
+    def test_media_pixel_file_change_is_rejected(self):
+        manifest_path = docs.ROOT / "docs/images/readme/manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        target = docs.ROOT / manifest["images"][0]["path"]
+        original_read = Path.read_bytes
+        def read(path):
+            return b"changed image" if path == target else original_read(path)
+        with patch.object(Path, "read_bytes", read):
+            errors, count = docs.check_readme_media(self.tracked)
+        self.assertEqual(count, 15)
+        self.assertTrue(any("file binding mismatch" in error for error in errors))
 
 
 if __name__ == "__main__":

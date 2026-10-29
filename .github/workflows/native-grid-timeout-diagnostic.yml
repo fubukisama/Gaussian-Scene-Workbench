@@ -1,0 +1,45 @@
+name: Native Grid Timeout Diagnostic
+
+# A single replay of one failed binary, never a build, benchmark or release gate.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  one-original-grid-process:
+    if: github.repository == 'fubukisama/Gaussian-Scene-Workbench' && github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify and download the exact failed diagnostic artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/replay_native_grid_timeout.ps1 -Mode Prepare
+      - name: Prepare the same owned real Windows display and Mesa runtime
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          ./scripts/setup_native_ci_graphics.ps1
+      - name: Run exactly one original grid command with its unchanged deadline
+        shell: pwsh
+        run: ./scripts/replay_native_grid_timeout.ps1 -Mode Run
+      - name: Retain the one-run trace, original archive identity and actual TMP images
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-grid-timeout-once-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gsw-grid-timeout-once/*.json
+            ${{ runner.temp }}/gsw-grid-timeout-once/harness/*.log
+            ${{ runner.temp }}/gsw-grid-timeout-once/harness/*.xml
+            ${{ runner.temp }}/gsw-grid-timeout-once/harness/Testing/Temporary/*
+            ${{ runner.temp }}/gsw-grid-timeout-once/tmp/gsw-infinite-grid-*.png
+          if-no-files-found: error
+          retention-days: 14

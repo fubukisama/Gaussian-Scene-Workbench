@@ -33,11 +33,33 @@
 
 [Why GSW](#why-gsw) · [Choose your starting point](#choose-your-starting-point) · [Capabilities](#capabilities) · [Get started](#get-started) · [Documentation](#documentation)
 
-## In the viewport
+## A visual tour
+
+Click an image to inspect the full-size controls. These are real application screens, not mockups.
+
+<table>
+<tr>
+<td width="50%"><strong>1. Add photos or video</strong><br><a href="docs/images/readme/en/import.png"><img src="docs/images/readme/en/import.png" width="440" alt="English media import form with camera input policy and managed source list"></a></td>
+<td width="50%"><strong>2. Inspect initialization</strong><br><a href="docs/images/readme/en/initialization.png"><img src="docs/images/readme/en/initialization.png" width="440" alt="English initialization controls with bounds, points and camera relationship diagram"></a></td>
+</tr>
+<tr>
+<td width="50%"><strong>3. Review training settings</strong><br><a href="docs/images/readme/en/training-3dgs.png"><img src="docs/images/readme/en/training-3dgs.png" width="440" alt="English 3DGS training form with resolution, quality controls and memory-pressure policy"></a></td>
+<td width="50%"><strong>4. Export a separate result</strong><br><a href="docs/images/readme/en/export.png"><img src="docs/images/readme/en/export.png" width="440" alt="English model export form with format, coordinates, units and output path"></a></td>
+</tr>
+</table>
+
+[View the 2DGS settings screen](docs/images/readme/en/training-2dgs.png) · [Capture source and image hashes](docs/images/README.md#workflow-ui-gallery)
+
+<sub>Captured in public CI with independent synthetic inputs, from the previous-name build `ac5c77b` (2026-10-29). These examples show controls—not executed training, GPU performance, current-build delivery acceptance or reconstruction quality. Values and runner paths are test fixtures, not recommended settings or user data.</sub>
+
+<details>
+<summary>Mixed-model viewport example</summary>
 
 ![Native viewport showing independent Gaussian, mesh and point-cloud test layers](docs/images/native-viewport-fixture.png)
 
 <sub>Actual viewport capture from a synthetic mixed-model regression scene (2026-10-27). This older snapshot demonstrates layer display, not current UI acceptance or reconstruction quality. [Image provenance](docs/images/README.md).</sub>
+
+</details>
 
 ## Why GSW
 

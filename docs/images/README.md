@@ -24,6 +24,36 @@
 
 </div>
 
+## Workflow UI gallery
+
+The `readme/` directory contains **15 unedited native-client screenshots**: five views in English, Simplified Chinese and Japanese. Each README uses its matching language. Four linked thumbnails introduce the controls; the 2DGS view is available separately alongside the 3DGS example.
+
+- Source: successful [Native UI Surfaces forms run 40800828340](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40800828340), captured 2026-10-29.
+- Application source: `ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f`, before the public-product-name change; artifact `12867316586`.
+- Actual capture: `QScreen::grabWindow(owned existing native client id)`. Original PNG bytes, dimensions, source states and artifact-relative paths are bound in [the media manifest](readme/manifest.json). The files have not been composited, retouched, relabeled or resampled; GitHub scales the thumbnails for presentation.
+- Source fixtures: [LanguageSmokeTest.cpp](https://github.com/fubukisama/Gaussian-Scene-Workbench/blob/ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f/native/src/LanguageSmokeTest.cpp) and [InitializationDialogUiTests.cpp](https://github.com/fubukisama/Gaussian-Scene-Workbench/blob/ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f/native/tests/InitializationDialogUiTests.cpp). They generate flat-color images, camera/initialization data and small PLY fixtures in isolated directories. Visible `runneradmin`, temporary paths, names and numeric settings belong to these tests, not to a user's project or recommended training recipe.
+
+| View | What the image shows | What it does not establish |
+| --- | --- | --- |
+| `import.png` | Media selection and camera-input policy | Successful reconstruction or real photographic input |
+| `initialization.png` | Range, point count, seed and prior controls; the relation diagram is shown where it fits the captured layout | GPU/backend training validation, a valid range for every scene or physical accuracy |
+| `training-3dgs.png` / `training-2dgs.png` | Actual request editors for both native training routes | Executed training, speed, convergence or quality; experimental controls are off |
+| `export.png` | Format, coordinate, unit and separate-output controls | Exported trained geometry or independent metric accuracy |
+
+All 15 selected frames were opened and inspected before publication. They show the scroll positions and responsive layouts that were actually captured; a frame is not a claim that every control or table column is simultaneously visible. These are **static UI examples, not a video recording**, current-build delivery acceptance, a complete-suite result or reconstruction-quality evidence. No user photographs, bug recordings, models, checkpoints, credentials or research data are included.
+
+<div lang="zh-CN">
+
+中文：图集含五种界面的中英日原始截图，来自公开 CI 的独立合成夹具和改名前的 `ac5c77b` 构建。缩略图可点击放大；截图内的临时路径、名称和数值都是测试数据。它们展示控件及实际滚动位置，不证明已执行训练、性能、收敛、尺度精度或当前安装版交付；不是录屏，也未使用用户照片、模型、检查点或研究资料。完整来源与文件哈希见上方清单。
+
+</div>
+
+<div lang="ja">
+
+日本語：五種類の画面について英語・簡体字中国語・日本語の未加工スクリーンショットを掲載しています。公開 CI の独立した合成テストデータと、改名前のビルド `ac5c77b` に由来します。クリックすると原寸で確認できます。表示される一時パス・名称・数値はテスト用です。実際の操作項目とスクロール位置を示す静止画であり、学習の実行・性能・収束・実物の寸法精度・現行インストール版の配布検証を示しません。録画ではなく、利用者の写真・モデル・チェックポイント・研究データは含みません。出所とハッシュは上記の一覧に記録しています。
+
+</div>
+
 The project icon is the existing `native/assets/gsw-app-icon.png`; no external project's branding, sponsor graphics or ranking badges were reused.
 
 </div>

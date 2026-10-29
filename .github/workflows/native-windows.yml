@@ -462,9 +462,29 @@ jobs:
           -DestinationRoot (Join-Path $PWD "native/artifact")
           -PythonExecutable $env:QA_PYTHON
 
+      - name: Build the separate developer publisher for owned installation fixtures
+        shell: pwsh
+        run: |
+          cmake -S native/updater-developer -B native/build-ci-developer-publisher `
+            -G 'Visual Studio 17 2022' -A x64
+          if($LASTEXITCODE -ne 0){throw 'Standalone developer publisher configure failed.'}
+          cmake --build native/build-ci-developer-publisher --config Release --parallel 2 `
+            --target gsw_native_developer_publisher
+          if($LASTEXITCODE -ne 0){throw 'Standalone developer publisher build failed.'}
+          windeployqt --release --no-translations --compiler-runtime `
+            "$PWD/native/build-ci-developer-publisher/Release/GSW Native Developer Publisher.exe"
+          if($LASTEXITCODE -ne 0){throw 'Private developer test-tool runtime deployment failed.'}
+
       - name: Verify managed update publication and stable entry points
         shell: pwsh
-        run: ./scripts/test_native_installation.ps1 -RuntimeDirectory "$PWD/native/artifact/bin" -ShortcutFixture "$PWD/native/build-ci/Release/gsw_native_shortcut_fixture.exe" -TestRoot "$env:RUNNER_TEMP/gsw-managed-update-acceptance"
+        env:
+          QA_PYTHON: ${{ steps.qa-python.outputs.python-path }}
+        run: |
+          ./scripts/test_native_installation.ps1 -RuntimeDirectory "$PWD/native/artifact/bin" `
+            -ShortcutFixture "$PWD/native/build-ci/Release/gsw_native_shortcut_fixture.exe" `
+            -TestRoot "$env:RUNNER_TEMP/gsw-managed-update-acceptance" `
+            -DeveloperPublisher "$PWD/native/build-ci-developer-publisher/Release/GSW Native Developer Publisher.exe" `
+            -PythonExecutable $env:QA_PYTHON
 
       - name: Verify native-only package
         shell: pwsh

@@ -33,11 +33,33 @@
 
 [GSWの特長](#gswの特長) · [入力から選ぶ](#入力から選ぶ) · [主な機能](#主な機能) · [はじめに](#はじめに) · [ドキュメント](#ドキュメント)
 
-## ビューポート
+## 画面で見るワークフロー
+
+画像をクリックすると原寸で確認できます。コンセプト画像ではなく、実際のアプリ画面です。
+
+<table>
+<tr>
+<td width="50%"><strong>1. 写真・動画を追加</strong><br><a href="docs/images/readme/ja/import.png"><img src="docs/images/readme/ja/import.png" width="440" alt="カメラ入力方針と管理対象の素材一覧を表示する日本語の取り込み画面"></a></td>
+<td width="50%"><strong>2. 初期化を確認</strong><br><a href="docs/images/readme/ja/initialization.png"><img src="docs/images/readme/ja/initialization.png" width="440" alt="範囲、点群、カメラ関係図を表示する日本語の初期化画面"></a></td>
+</tr>
+<tr>
+<td width="50%"><strong>3. 学習設定を点検</strong><br><a href="docs/images/readme/ja/training-3dgs.png"><img src="docs/images/readme/ja/training-3dgs.png" width="440" alt="解像度、品質制御、GPUメモリ圧力方針を表示する日本語の3DGS学習画面"></a></td>
+<td width="50%"><strong>4. 別の成果物として出力</strong><br><a href="docs/images/readme/ja/export.png"><img src="docs/images/readme/ja/export.png" width="440" alt="形式、座標、単位、保存先を指定する日本語のモデル出力画面"></a></td>
+</tr>
+</table>
+
+[2DGS の設定画面を見る](docs/images/readme/ja/training-2dgs.png) · [画像の出所とハッシュ](docs/images/README.md#workflow-ui-gallery)
+
+<sub>公開 CI で独立した合成入力を使って取得した実際の画面です。旧製品名のビルド `ac5c77b`（2026-10-29）に由来し、操作項目を示すもので、学習の実行、GPU 性能、現行ビルドの配布検証、再構築品質を示しません。数値と実行環境のパスはテスト用であり、推奨設定や利用者のデータではありません。</sub>
+
+<details>
+<summary>複数形式を混在させたビューポートの例</summary>
 
 ![独立したガウシアン・メッシュ・点群のテストレイヤーを表示するネイティブビューポート](docs/images/native-viewport-fixture.png)
 
 <sub>複数形式を混在させた合成回帰シーンの実際の画面（2026-10-27）。この旧版の画像はレイヤー表示の例であり、現在の UI の受入検証や再構築品質を示すものではありません。[画像の出典](docs/images/README.md)。</sub>
+
+</details>
 
 ## GSWの特長
 

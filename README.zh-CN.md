@@ -33,11 +33,33 @@
 
 [为什么选择 GSW](#为什么选择-gsw) · [选择你的起点](#选择你的起点) · [功能一览](#功能一览) · [开始使用](#开始使用) · [文档](#文档)
 
-## 原生视口
+## 界面图解
+
+点击图片可查看原尺寸控件。这些是真实程序界面，不是概念图。
+
+<table>
+<tr>
+<td width="50%"><strong>1. 加入照片或视频</strong><br><a href="docs/images/readme/zh-CN/import.png"><img src="docs/images/readme/zh-CN/import.png" width="440" alt="中文素材导入界面，包含相机输入策略和托管素材列表"></a></td>
+<td width="50%"><strong>2. 检查初始化</strong><br><a href="docs/images/readme/zh-CN/initialization.png"><img src="docs/images/readme/zh-CN/initialization.png" width="440" alt="中文初始化界面，显示粗范围、点数、随机种子与先验声明"></a></td>
+</tr>
+<tr>
+<td width="50%"><strong>3. 核对训练设置</strong><br><a href="docs/images/readme/zh-CN/training-3dgs.png"><img src="docs/images/readme/zh-CN/training-3dgs.png" width="440" alt="中文3DGS训练界面，包含分辨率、质量控制和显存压力策略"></a></td>
+<td width="50%"><strong>4. 独立导出成果</strong><br><a href="docs/images/readme/zh-CN/export.png"><img src="docs/images/readme/zh-CN/export.png" width="440" alt="中文模型导出界面，包含格式、坐标、单位和输出路径"></a></td>
+</tr>
+</table>
+
+[查看 2DGS 设置界面](docs/images/readme/zh-CN/training-2dgs.png) · [截图来源与文件哈希](docs/images/README.md#workflow-ui-gallery)
+
+<sub>图片来自公开 CI 中使用独立合成输入的真实截图，源于改名前的构建 `ac5c77b`（2026-10-29）。仅展示控件，不代表已执行训练、GPU 性能、当前构建交付验收或重建质量。数值和运行器路径是测试夹具，不是推荐参数或用户数据。</sub>
+
+<details>
+<summary>混合模型视口示例</summary>
 
 ![原生视口显示独立的高斯、网格与点云测试图层](docs/images/native-viewport-fixture.png)
 
 <sub>来自合成混合模型回归场景的实际视口截图（2026-10-27）。这是较早的画面，仅展示图层显示，不代表当前 UI 验收或重建质量。[图片来源](docs/images/README.md)。</sub>
+
+</details>
 
 ## 为什么选择 GSW
 
