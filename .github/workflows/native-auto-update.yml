@@ -215,6 +215,14 @@ jobs:
           python -I -B scripts/test_native_developer_publisher.py --remote-fixture-only `
             --publisher $publisher --work-root D:/gu/developer-red --evidence "$PWD/native/developer-evidence"
           if($LASTEXITCODE -ne 0){throw 'Shared native developer activation contract failed.'}
+      - name: Real owned ACL occupied-pointer and constrained-volume failures
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          python -I -B scripts/test_native_update_space.py --remote-fixture-only `
+            --publisher "$PWD/native/build-developer-publisher/Release/GSW Native Developer Publisher.exe" `
+            --work-root D:/gu/activation-space --evidence "$PWD/native/developer-evidence/space"
+          if($LASTEXITCODE -ne 0){throw 'Native activation resource-failure contract failed.'}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -331,10 +339,17 @@ jobs:
         shell: pwsh
         run: |
           cmake -S native/updater -B native/build-auto-update -G 'Visual Studio 17 2022' -A x64 `
-            -DBUILD_TESTING=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe"
+            -DBUILD_TESTING=ON -DGSW_ACTIVATION_FAULT_TESTS=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-updater/Scripts/python.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Updater configure failed.' }
-          cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests gsw_update_activation_tests gsw_update_path_tests
+          cmake --build native/build-auto-update --config Release --parallel --target gsw_update_download_tests gsw_update_activation_tests gsw_update_path_tests gsw_activation_fault_fixture
           if ($LASTEXITCODE -ne 0) { throw 'Updater build failed.' }
+          $runtime="$PWD/native/fault-probe-runtime"
+          New-Item -ItemType Directory -Path "$runtime/bin",native/auto-update-evidence -Force | Out-Null
+          windeployqt --release --no-translations --no-compiler-runtime --dir "$runtime/bin" `
+            "$PWD/native/build-auto-update/Release/gsw_activation_fault_fixture.exe"
+          if($LASTEXITCODE -ne 0){throw 'Isolated fault probe Qt runtime staging failed.'}
+          ./scripts/stage_native_crt.ps1 -PackageRoot $runtime | Out-File native/auto-update-evidence/fault-probe-crt.log -Encoding utf8
+          Copy-Item -LiteralPath "$runtime/native-crt-manifest.json" -Destination native/auto-update-evidence/fault-probe-crt.json
       - name: Actual HTTPS download contract
         shell: pwsh
         run: |
@@ -343,6 +358,16 @@ jobs:
             --output-log native/auto-update-evidence/download.log `
             --output-junit "$PWD/native/auto-update-evidence/download.xml"
           if ($LASTEXITCODE -ne 0) { throw 'Real native HTTPS contract failed.' }
+      - name: Actual cross-process activation contention termination and recovery
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-updater/Scripts/python.exe" -I -B scripts/test_native_activation_interruptions.py --remote-fixture-only `
+            --driver "$PWD/native/build-auto-update/Release/gsw_activation_fault_fixture.exe" `
+            --runtime-dir "$PWD/native/fault-probe-runtime/bin" `
+            --fixture "$PWD/scripts/native_update_activation_fixture.py" `
+            --evidence "$PWD/native/auto-update-evidence/interruptions" 2>&1 | Tee-Object native/auto-update-evidence/interruptions.log
+          if($LASTEXITCODE -ne 0){throw 'Actual cross-process activation contract failed.'}
       - name: Complete archive contract
         if: ${{ !cancelled() }}
         shell: pwsh

@@ -15,6 +15,21 @@ if(WIN32)
   target_link_libraries(gsw_startup_health PRIVATE bcrypt advapi32 user32)
   target_compile_definitions(gsw_startup_health PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+option(GSW_ACTIVATION_FAULT_TESTS "Build remote-only separately instrumented activation fixture" OFF)
+if(BUILD_TESTING AND GSW_ACTIVATION_FAULT_TESTS)
+  # Do not add this definition to gsw_activation_core or any shipping target.
+  qt_add_executable(gsw_activation_fault_fixture
+    ../tests/NativeActivationFaultFixture.cpp
+    ../src/NativeActivationCore.cpp ../src/NativeDeveloperPublisher.cpp)
+  target_include_directories(gsw_activation_fault_fixture PRIVATE
+    ../src ../third_party/nlohmann ../third_party/miniz)
+  target_compile_definitions(gsw_activation_fault_fixture PRIVATE
+    GSW_ACTIVATION_FAULT_FIXTURE=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_link_libraries(gsw_activation_fault_fixture PRIVATE Qt6::Core gsw_miniz)
+  if(MSVC)
+    target_compile_options(gsw_activation_fault_fixture PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+endif()
 if(GSW_UPDATER_FIXTURE_BUILD)
   target_compile_definitions(gsw_startup_health PRIVATE GSW_UPDATER_FIXTURE_BUILD=1)
 endif()

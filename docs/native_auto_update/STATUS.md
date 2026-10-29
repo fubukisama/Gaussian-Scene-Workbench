@@ -18,6 +18,8 @@ secrets, public candidate uploads or channel promotion.
 | [Current confirmed source boundary](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40800050974) | `72472bb21c015c880b3e43af217c7afccfd8f35d` | Six groups pass. Actual registry closure reaches independent raw-archive checks but rejects the standard Cargo vendor projection; the original archive remains retained | isolated; source closure NOT passed |
 | [Actual full source closure](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40811574832) | `8e9dcb8898343fae67e29dce6cffea3683264660` | Source closure PASS:188 registry archives,3209 exact Git files,12515 original registry files,12446 standard vendor files,69 filtered metadata files retained in raw archives. Normal approved redirect/UI/trust/developer tests pass. Health has genuine lifecycle failures under diagnosis; profile functionality passes but evidence upload needs workspace plumbing | isolated; not delivery approval or application acceptance |
 | [Health and retry diagnostic boundary](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40817655279) | `9f939b3e25bc2a064a81aa5be615961651e932c7` | Original A-B-badC-A lifecycle passes; health alone is UNCONFIRMED. Retained traces show Qt construction at2.374s, painted readiness at6.004s and normal exit0 at6.157s, after the fixture-only1.5s pipe observation had expired. Actual HTTPS503 retry is RED with `download_http_error`; source/UI/trust/developer/policy groups pass | isolated diagnostic evidence; fixes require a new remote GREEN |
+| [Compile-time profile evidence](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40817655279/job/123262413639) | `9f939b3e25bc2a064a81aa5be615961651e932c7` | Default/configured probes4tests and unsafe-input rejection35subcases pass, with the corrected in-workspace evidence upload | isolated developer probes only; no production package configured |
+| [Official disabled engine component](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40817655291) | `9f939b3e25bc2a064a81aa5be615961651e932c7` | Official Helper default returns NOT_CONFIGURED; full component ZIP, exact Git/raw-crate source, fresh merge and badZIP/wrongsource/runtime-conflict rejection pass. Uploaded artifact12873258497 is retained | component acceptance only; merge uses a non-executable owned app fixture, not formal GSW startup |
 
 Health confirmation/recovery, normal redirect/retry and compile-time production
 profile configuration now have independent first-RED slices. Their queued or
@@ -35,6 +37,14 @@ The earlier Qt A/B lifecycle fixture uses real windows and the real stable
 launcher/helper, but its scope is explicitly not the formal GSW renderer or
 3DGS/2DGS full optimizer-state training acceptance. No such quality or backend
 claim is inferred from a lifecycle or UI test.
+
+Applicable isolated gaps remain separate from public authorization: independent
+recovery UI, authenticated test-only first-install/bootstrap migration, actual
+cross-process contention and kill-at-extract/slot/pointer recovery, ACL/occupied/
+insufficient-space failures, and overlapping old application/owned worker/queue
+during publication. Existing component success is not completion of these packet
+contracts. A fresh local research-preview file bundle is not DEL-01 managed
+delivery and does not upgrade existing current/shortcut entry points.
 
 Production is not configured: no production root, approved complete release
 policy, protected signing environment or public channel promotion. Ordinary

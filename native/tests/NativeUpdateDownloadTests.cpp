@@ -132,6 +132,62 @@ private slots:
       QVERIFY(!row.value("authorization_present").toBool());
     }
   }
+  void retriesAnInterruptedHttpsBodyWithExactlyTheBoundStrongEtagPrefix() {
+    const auto logPath = fixture.value("requestLog").toString();
+    const auto previousLogSize = read(logPath).size();
+    auto r = request(QStringLiteral("/drop-once"), QStringLiteral("retry-interrupted.bin"));
+    const QByteArray original("existing verified package remains until final commit");
+    QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
+    QCOMPARE(previous.write(original), qint64(original.size())); previous.close();
+    const auto currentPath = temporary.filePath(QStringLiteral("interrupted-current.json"));
+    const QByteArray active("active version must not change on a network retry");
+    QFile current(currentPath); QVERIFY(current.open(QIODevice::WriteOnly));
+    QCOMPARE(current.write(active), qint64(active.size())); current.close();
+    auto p = policy(); p.maximumAttempts = 2;
+    NativeUpdateDownload client;
+    QSignalSpy done(&client, &NativeUpdateDownload::finished);
+    QSignalSpy progress(&client, &NativeUpdateDownload::progress);
+    bool retainedExactPrefix = false, oldFilesUnchangedDuringRetry = false;
+    QObject::connect(&client, &NativeUpdateDownload::stateChanged, &client,
+        [&](NativeUpdateDownload::State state) {
+      if (state != NativeUpdateDownload::State::RetryWait) return;
+      const auto prefix = read(r.destinationPath + QStringLiteral(".part"));
+      retainedExactPrefix = prefix.size() == 32768 &&
+          prefix == read(fixture.value("payloadPath").toString()).left(32768);
+      oldFilesUnchangedDuringRetry = read(r.destinationPath) == original && read(currentPath) == active;
+    });
+    QVERIFY(client.start(r, p));
+    QVERIFY(done.wait(12000));
+    const auto result = qvariant_cast<NativeUpdateDownloadResult>(done.first().first());
+    QVERIFY2(result.ok, qPrintable(result.code));
+    QVERIFY(result.resumed);
+    QVERIFY(retainedExactPrefix);
+    QVERIFY(oldFilesUnchangedDuringRetry);
+    QCOMPARE(result.receivedBytes, r.expectedLength);
+    QCOMPARE(read(r.destinationPath), read(fixture.value("payloadPath").toString()));
+    QCOMPARE(read(currentPath), active);
+    qint64 previousReceived = 0;
+    for (const auto &sample : progress) {
+      const auto received = sample[0].toLongLong();
+      const auto total = sample[1].toLongLong();
+      QCOMPARE(total, r.expectedLength);
+      QVERIFY(received >= previousReceived && received <= total);
+      previousReceived = received;
+    }
+    QList<QJsonObject> requests;
+    for (const auto &line : read(logPath).mid(previousLogSize).split('\n')) {
+      const auto row = QJsonDocument::fromJson(line).object();
+      if (!row.isEmpty()) requests.append(row);
+    }
+    QCOMPARE(requests.size(), qsizetype(p.maximumAttempts));
+    QCOMPARE(requests[0].value("path").toString(), QStringLiteral("/drop-once"));
+    QVERIFY(requests[0].value("range").toString().isEmpty());
+    QCOMPARE(requests[1].value("path").toString(), QStringLiteral("/drop-once"));
+    QCOMPARE(requests[1].value("range").toString(), QStringLiteral("bytes=32768-"));
+    QCOMPARE(requests[1].value("if_range").toString(), QStringLiteral("\"owned-payload-a\""));
+    QTest::qWait(100);
+    QCOMPARE(done.size(), qsizetype(1));
+  }
   void cancellationRetainsOwnedStrongEtagPrefixAndResumesActualHttpsRange() {
     auto r = request(QStringLiteral("/slow"), QStringLiteral("resume.bin"));
     QFile previous(r.destinationPath); QVERIFY(previous.open(QIODevice::WriteOnly));
