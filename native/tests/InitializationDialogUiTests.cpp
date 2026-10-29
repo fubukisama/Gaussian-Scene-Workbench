@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -182,16 +183,96 @@ int main(int argc,char **argv) {
   dialog.applySuggestion();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="ready"&&!dialog.requestDocument().contains("suggestion")&&dialog.requestDocument().value("initialization").toObject().value("provenance").toObject().contains("derived_suggestion"),
       "explicit adoption preserves assumptions and rechecks actual generated points");
-  const QString pointHash=dialog.report().value("point_sha256").toString();QString version;QJsonObject versionSummary;int created=0;
+  const QString pointHash=dialog.report().value("point_sha256").toString();
+  const QJsonObject publicationRequest=dialog.requestDocument();
+  QString version;QJsonObject versionSummary;int created=0;
+  const auto outputArgument=[](const gsw::InitializationDialog &candidate){
+    const auto *process=candidate.findChild<QProcess *>();
+    const auto args=process?process->arguments():QStringList{};
+    const int index=args.indexOf(QStringLiteral("--output-directory"));
+    return index>=0&&index+1<args.size()?args[index+1]:QString();
+  };
+  const auto finalArtifactLengths=[](const QString &output){
+    const QString hash(64,QLatin1Char('0'));
+    return QJsonObject{
+      {"inputs",QDir(output).filePath(QStringLiteral("source/initialization/inputs/")+hash+QStringLiteral(".json")).size()},
+      {"points",QDir(output).filePath(QStringLiteral("source/initialization/points/")+hash+QStringLiteral(".npz")).size()},
+      {"reports",QDir(output).filePath(QStringLiteral("source/initialization/reports/")+hash+QStringLiteral(".json")).size()}};
+  };
+  const auto exceedsLegacyLimit=[&](const QString &output){
+#ifdef Q_OS_WIN
+    const auto lengths=finalArtifactLengths(output);
+    for(auto value=lengths.constBegin();value!=lengths.constEnd();++value)if(value.value().toInt()>=260)return true;
+#else
+    Q_UNUSED(output);
+#endif
+    return false;
+  };
+  const auto ownedPublicationEntries=[&]{
+    QStringList entries;
+    const QDir parent(workspace.filePath(QStringLiteral(".gsw/i")));
+    for(const QString &name:parent.entryList(QDir::Dirs|QDir::Hidden|QDir::NoDotAndDotDot))
+      if(!name.startsWith(QStringLiteral("request-")))entries.append(name);
+    return entries;
+  };
+  const QStringList publicationEntriesBefore=ownedPublicationEntries();
   QObject::connect(&dialog,&gsw::InitializationDialog::versionCreated,[&](const QString &path,const QJsonObject &summary){++created;version=path;versionSummary=summary;});
   dialog.createVersion();
-  const bool creationFinished=waitFor([&]{return !dialog.isRunning();});
-  if(!creationFinished||created!=1||!QFileInfo(version).isDir()){
+  const QString originalOutput=outputArgument(dialog);
+  bool creationFinished=waitFor([&]{return !dialog.isRunning();});
+  check(!originalOutput.isEmpty(),"the original publication attempt exposes its actual worker output argument");
+  QString successfulWorkspace=workspace.path();
+  gsw::InitializationDialog *publisher=&dialog;
+  // Keep the exact caller-root attempt and its refusal. The separate positive
+  // fixture is not a retry/relocation in production and never changes that root.
+  std::unique_ptr<QTemporaryDir> positiveWorkspace;
+  std::unique_ptr<gsw::InitializationDialog> positivePublisher;
+  if(!originalOutput.isEmpty()&&exceedsLegacyLimit(originalOutput)){
     const auto *diagnostic=dialog.findChild<QLabel *>(QStringLiteral("initializationSummary"));
-    const auto *ownedProcess=dialog.findChild<QProcess *>();
-    const auto bytes=QJsonDocument(QJsonObject{{"workspace",workspace.path()},{"versionSignalCount",created},{"versionPath",version},
+    const bool refused=creationFinished&&created==0&&version.isEmpty()&&!QFileInfo::exists(originalOutput)&&
+        diagnostic&&diagnostic->text().contains(QStringLiteral("initialization_unsafe_output"))&&
+        diagnostic->text().contains(QStringLiteral("MAX_PATH"))&&dialog.report().isEmpty()&&
+        ownedPublicationEntries()==publicationEntriesBefore&&digest(metadata)==sourceHash&&
+        digest(QDir(source).filePath(QStringLiteral("image.png")))==imageHash;
+    check(refused,"the unchanged caller-root publication refuses a real over-MAX_PATH artifact without publishing, staging residue or source mutation");
+    qInfo().noquote()<<"INITIALIZATION_ORIGINAL_PATH"<<QJsonDocument(QJsonObject{
+      {"workspace",workspace.path()},{"output",originalOutput},{"finalArtifactLengths",finalArtifactLengths(originalOutput)},
+      {"refusalVerified",refused},{"versionSignals",created},{"destinationExists",QFileInfo::exists(originalOutput)}}).toJson(QJsonDocument::Compact);
+    const QString positiveParent=qEnvironmentVariable("GSW_INITIALIZATION_PUBLICATION_TEST_ROOT");
+    const bool declared=!positiveParent.isEmpty()&&QDir::isAbsolutePath(positiveParent)&&QFileInfo(positiveParent).isDir();
+    check(declared,"a separately declared owned publication-test root is required for the complete valid-output success contract");
+    if(!declared){gsw::tests::finishUiFormsEvidence(app,visualForms);return 1;}
+    positiveWorkspace=std::make_unique<QTemporaryDir>(QDir(positiveParent).filePath(QStringLiteral("publication-XXXXXX")));
+    check(positiveWorkspace->isValid(),"the independent positive publication workspace is fresh and cannot overwrite prior evidence");
+    if(!positiveWorkspace->isValid()){gsw::tests::finishUiFormsEvidence(app,visualForms);return 1;}
+    successfulWorkspace=positiveWorkspace->path();
+    const QString plannedPositiveOutput=QDir(successfulWorkspace).filePath(QStringLiteral(".gsw/i/v")+QString(32,QLatin1Char('0')));
+    const bool positiveBudget=!exceedsLegacyLimit(plannedPositiveOutput);
+    check(positiveBudget,"the declared positive workspace budget must fit the fixed managed-version shape before any publication starts");
+    if(!positiveBudget){gsw::tests::finishUiFormsEvidence(app,visualForms);return 1;}
+    positivePublisher=std::make_unique<gsw::InitializationDialog>(python,root,successfulWorkspace,source,identity,initial,QProcessEnvironment::systemEnvironment());
+    publisher=positivePublisher.get();
+    check(publisher->setRequestDocument(publicationRequest),"the separate actual dialog accepts the identical full request, not an injected report");
+    publisher->startInspection();
+    check(waitFor([&]{return !publisher->isRunning();})&&publisher->report().value("status")=="ready"&&
+        publisher->report().value("point_sha256")==pointHash&&publisher->requestDocument()==publicationRequest,
+        "the separate workspace re-inspects the original source and reproduces the identical frozen point identity");
+    QObject::connect(publisher,&gsw::InitializationDialog::versionCreated,[&](const QString &path,const QJsonObject &summary){++created;version=path;versionSummary=summary;});
+    publisher->createVersion();
+    const QString positiveOutput=outputArgument(*publisher);
+    creationFinished=waitFor([&]{return !publisher->isRunning();});
+    check(!positiveOutput.isEmpty()&&!exceedsLegacyLimit(positiveOutput),
+        "the explicitly declared positive fixture must fit every actual final-artifact path; no skip or search for a shorter root");
+    qInfo().noquote()<<"INITIALIZATION_POSITIVE_PATH"<<QJsonDocument(QJsonObject{
+      {"workspace",successfulWorkspace},{"output",positiveOutput},{"finalArtifactLengths",finalArtifactLengths(positiveOutput)},
+      {"versionSignals",created},{"destinationExists",QFileInfo::exists(positiveOutput)}}).toJson(QJsonDocument::Compact);
+  }
+  if(!creationFinished||created!=1||!QFileInfo(version).isDir()){
+    const auto *diagnostic=publisher->findChild<QLabel *>(QStringLiteral("initializationSummary"));
+    const auto *ownedProcess=publisher->findChild<QProcess *>();
+    const auto bytes=QJsonDocument(QJsonObject{{"workspace",successfulWorkspace},{"versionSignalCount",created},{"versionPath",version},
       {"workerArguments",QJsonArray::fromStringList(ownedProcess?ownedProcess->arguments():QStringList{})},
-      {"summary",diagnostic?diagnostic->text():QString()},{"report",dialog.report()}}).toJson(QJsonDocument::Compact);
+      {"summary",diagnostic?diagnostic->text():QString()},{"report",publisher->report()}}).toJson(QJsonDocument::Compact);
     std::fprintf(stderr,"Create-version diagnostic: %s\n",bytes.constData());
   }
   check(creationFinished&&created==1&&QFileInfo(version).isDir()&&versionSummary.value("posePolicy")=="locked"&&versionSummary.value("dataIdentity").toString().size()==64,
@@ -202,8 +283,8 @@ int main(int argc,char **argv) {
   const auto artifact=frozen.value("materialization").toObject();
   check(frozen.value("kind")=="random"&&artifact.value("point_sha256")==pointHash&&digest(QDir(version).filePath(artifact.value("path").toString())).toHex()==artifact.value("sha256").toString(),
       "published random initialization has actual frozen points, a verified artifact hash and no false external-prior label");
-  dialog.createVersion();check(created==1&&!dialog.isRunning(),"an already published version cannot be silently published again");
-  gsw::InitializationDialog reopened(python,root,workspace.path(),version,versionSummary.value("dataIdentity").toString(),frozen,QProcessEnvironment::systemEnvironment());
+  publisher->createVersion();check(created==1&&!publisher->isRunning(),"an already published version cannot be silently published again");
+  gsw::InitializationDialog reopened(python,root,successfulWorkspace,version,versionSummary.value("dataIdentity").toString(),frozen,QProcessEnvironment::systemEnvironment());
   reopened.startInspection();
   const bool reopenedFinished=waitFor([&]{return !reopened.isRunning();});
   if(!reopenedFinished||reopened.report().value("status")!="ready"){
