@@ -503,6 +503,34 @@ class InstallerDefinitionTests(unittest.TestCase):
             self.assertIn('Name: "' + locale + '"; MessagesFile:', self.definition)
         self.assertRegex(self.definition, r"(?m)^AppId=\{#GswAppId\}$")
 
+    def test_display_brand_changes_without_changing_legacy_upgrade_identity(self):
+        for field, value in (
+                ("AppName", "Gaussian Splatting Workbench"),
+                ("AppVerName", "Gaussian Splatting Workbench {#GswVersion}"),
+                ("UninstallDisplayName", "Gaussian Splatting Workbench"),
+                ("DefaultGroupName", "Gaussian Splatting Workbench")):
+            with self.subTest(field=field):
+                self.assertIn(field + "=" + value + "\n", self.definition)
+        self.assertIn("UsePreviousAppDir=yes", self.definition)
+        self.assertIn("Apps\\Gaussian Scene Workbench", self.definition)
+        self.assertIn("{localappdata}\\Programs\\Gaussian Scene Workbench", self.definition)
+        icon_lines = re.findall(r'^Name: "\{(?:group|autodesktop)\}[^\n]+', self.definition, re.MULTILINE)
+        self.assertEqual(len(icon_lines), 2)
+        for line in icon_lines:
+            self.assertIn('\\Gaussian Splatting Workbench";', line)
+            self.assertIn('Filename: "{app}\\bin\\Gaussian Scene Workbench.exe";', line)
+            self.assertIn('AppUserModelID: "Fubukisama.GaussianSceneWorkbench.Native"', line)
+        self.assertNotIn("[InstallDelete]", self.definition)
+
+    def test_current_installer_messages_keep_all_three_locales_on_the_new_brand(self):
+        catalog = installer.load_catalog(ROOT / "native/i18n/catalog.json")
+        for identifier in ("GswFinished", "GswNonemptyDirectory"):
+            source = installer.MESSAGES[identifier]
+            for locale in installer.LOCALES:
+                with self.subTest(message=identifier, locale=locale):
+                    self.assertIn("Gaussian Splatting Workbench", catalog[source][locale])
+                    self.assertNotIn("Gaussian Scene Workbench", catalog[source][locale])
+
     def test_unrelated_nonempty_directories_require_matching_installation_marker(self):
         self.assertIn("gsw-installation.ini", self.definition)
         self.assertIn("GswAppId", self.definition)

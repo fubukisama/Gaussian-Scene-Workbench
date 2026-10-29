@@ -590,9 +590,9 @@
   "安装内容与训练环境": {"zh_CN":"安装内容与训练环境","en_US":"Installation and Training Environments","ja_JP":"インストール内容と学習環境"},
   "桌面程序与研究运行环境分开管理。": {"zh_CN":"桌面程序与研究运行环境分开管理。","en_US":"The desktop application and research runtimes are managed separately.","ja_JP":"デスクトップアプリと研究用の実行環境は別々に管理します。"},
   "本安装程序包含原生桌面程序、Qt 运行库、计算后端代码、对应源码和许可证。CUDA、PyTorch、Python/Conda、COLMAP 及其他研究运行库需要另行配置；不会复制或改动你已有的训练环境。\n\n默认优先安装到可写的非系统盘；你可以在下一步更改目录。升级和卸载只处理已安装的程序文件，不删除你新增的工程、模型、照片、检查点或设置。升级前请自行保存并关闭正在运行的程序；安装器不会强制结束或自动启动程序。": {"zh_CN":"本安装程序包含原生桌面程序、Qt 运行库、计算后端代码、对应源码和许可证。CUDA、PyTorch、Python/Conda、COLMAP 及其他研究运行库需要另行配置；不会复制或改动你已有的训练环境。\n\n默认优先安装到可写的非系统盘；你可以在下一步更改目录。升级和卸载只处理已安装的程序文件，不删除你新增的工程、模型、照片、检查点或设置。升级前请自行保存并关闭正在运行的程序；安装器不会强制结束或自动启动程序。","en_US":"This installer includes the native desktop application, Qt runtime, compute backend code, corresponding source and licenses. CUDA, PyTorch, Python/Conda, COLMAP and other research runtimes require separate configuration. Existing training environments are not copied or changed.\n\nA writable non-system drive is preferred by default; you can change the folder next. Upgrades and uninstall remove only installed program files, not projects, models, photos, checkpoints or settings you add. Save your work and close the running application before upgrading; Setup never force-closes or automatically launches it.","ja_JP":"このインストーラーにはネイティブデスクトップアプリ、Qt ランタイム、計算バックエンドのコード、対応ソース、ライセンスが含まれます。CUDA、PyTorch、Python/Conda、COLMAP などの研究用ランタイムは別途設定が必要です。既存の学習環境をコピーしたり変更したりしません。\n\n既定では書き込み可能なシステム以外のドライブを優先します。次の画面でフォルダーを変更できます。更新やアンインストールは導入したプログラムファイルのみを対象とし、追加したプロジェクト、モデル、写真、チェックポイント、設定は削除しません。更新前に作業を保存してアプリを終了してください。強制終了や自動起動は行いません。"},
-  "安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Scene Workbench。程序不会自动启动。": {"zh_CN":"安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Scene Workbench。程序不会自动启动。","en_US":"Installation is complete. Open Gaussian Scene Workbench from the Start menu or your optional desktop shortcut. The application will not start automatically.","ja_JP":"インストールが完了しました。スタートメニューまたは選択したデスクトップショートカットから Gaussian Scene Workbench を開いてください。アプリは自動起動しません。"},
+  "安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Splatting Workbench。程序不会自动启动。": {"zh_CN":"安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Splatting Workbench。程序不会自动启动。","en_US":"Installation is complete. Open Gaussian Splatting Workbench from the Start menu or your optional desktop shortcut. The application will not start automatically.","ja_JP":"インストールが完了しました。スタートメニューまたは選択したデスクトップショートカットから Gaussian Splatting Workbench を開いてください。アプリは自動起動しません。"},
   "请选择专用的程序子文件夹，不要选择磁盘根目录、Windows 目录或用户主目录。": {"zh_CN":"请选择专用的程序子文件夹，不要选择磁盘根目录、Windows 目录或用户主目录。","en_US":"Choose a dedicated application subfolder, not a drive root, the Windows folder or your user profile folder.","ja_JP":"ドライブのルート、Windows フォルダー、ユーザーのホームではなく、アプリ専用のサブフォルダーを選択してください。"},
-  "此目录包含其他文件，且不是已有的 Gaussian Scene Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。": {"zh_CN":"此目录包含其他文件，且不是已有的 Gaussian Scene Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。","en_US":"This folder contains unrelated files and is not an existing Gaussian Scene Workbench installation. Choose an empty folder or an existing application folder; unrelated files will not be overwritten.","ja_JP":"このフォルダーには別のファイルがあり、既存の Gaussian Scene Workbench の導入先ではありません。空のフォルダーまたは既存のアプリフォルダーを選択してください。無関係なファイルは上書きしません。"},
+  "此目录包含其他文件，且不是已有的 Gaussian Splatting Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。": {"zh_CN":"此目录包含其他文件，且不是已有的 Gaussian Splatting Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。","en_US":"This folder contains unrelated files and is not an existing Gaussian Splatting Workbench installation. Choose an empty folder or an existing application folder; unrelated files will not be overwritten.","ja_JP":"このフォルダーには別のファイルがあり、既存の Gaussian Splatting Workbench の導入先ではありません。空のフォルダーまたは既存のアプリフォルダーを選択してください。無関係なファイルは上書きしません。"},
   "刷新配对": {"zh_CN":"刷新配对","en_US":"Refresh Pairs","ja_JP":"対応付けを更新"},
   "指标协议：RGB8 编码值 · PSNR 汇总 MSE · SSIM 11×11 高斯有效窗口": {"zh_CN":"指标协议：RGB8 编码值 · PSNR 汇总 MSE · SSIM 11×11 高斯有效窗口","en_US":"Protocol: encoded RGB8 · PSNR from pooled MSE · SSIM with valid 11×11 Gaussian windows","ja_JP":"指標プロトコル：RGB8 符号値 · 全有効画素の MSE による PSNR · 有効な 11×11 ガウス窓の SSIM"},
   "RGB8 编码值除以 255，不做颜色变换或线性化。PSNR 按全部有效通道的均方误差汇总；SSIM 使用 11×11、σ=1.5 高斯有效窗口并按窗口数加权。它不等于训练损失 SSIM，也不验证留出集来源或几何精度。": {"zh_CN":"RGB8 编码值除以 255，不做颜色变换或线性化。PSNR 按全部有效通道的均方误差汇总；SSIM 使用 11×11、σ=1.5 高斯有效窗口并按窗口数加权。它不等于训练损失 SSIM，也不验证留出集来源或几何精度。","en_US":"Encoded RGB8 values are divided by 255, without color conversion or linearization. PSNR uses pooled mean-squared error over all valid channels. SSIM uses valid 11×11 Gaussian windows with sigma 1.5, weighted by valid-window count. This is not training-loss SSIM and does not verify held-out provenance or geometry accuracy.","ja_JP":"RGB8 の符号値を 255 で割り、色変換や線形化は行いません。PSNR は全有効チャンネルの平均二乗誤差を集計し、SSIM は 11×11・σ=1.5 の有効ガウス窓を有効窓数で重み付けします。学習損失の SSIM とは異なり、ホールドアウトの出所や幾何精度も検証しません。"},
@@ -2004,10 +2004,10 @@
     "en_US": "Open Project",
     "ja_JP": "プロジェクトを開く"
   },
-  "打开 Gaussian Scene Workbench 工程": {
-    "zh_CN": "打开 Gaussian Scene Workbench 工程",
-    "en_US": "Open Gaussian Scene Workbench Project",
-    "ja_JP": "Gaussian Scene Workbench プロジェクトを開く"
+  "打开 Gaussian Splatting Workbench 工程": {
+    "zh_CN": "打开 Gaussian Splatting Workbench 工程",
+    "en_US": "Open Gaussian Splatting Workbench Project",
+    "ja_JP": "Gaussian Splatting Workbench プロジェクトを開く"
   },
   "保存工程": {
     "zh_CN": "保存工程",
@@ -2474,15 +2474,15 @@
     "en_US": "Help",
     "ja_JP": "ヘルプ"
   },
-  "关于 Gaussian Scene Workbench": {
-    "zh_CN": "关于 Gaussian Scene Workbench",
-    "en_US": "About Gaussian Scene Workbench",
-    "ja_JP": "Gaussian Scene Workbench について"
+  "关于 Gaussian Splatting Workbench": {
+    "zh_CN": "关于 Gaussian Splatting Workbench",
+    "en_US": "About Gaussian Splatting Workbench",
+    "ja_JP": "Gaussian Splatting Workbench について"
   },
-  "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。": {
-    "zh_CN": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。",
-    "en_US": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>Gaussian scene research workbench<br><br>Qt 6 native desktop architecture, built %1.<br>Native desktop preview channel; the stable release remains on main.",
-    "ja_JP": "<b>Gaussian Scene Workbench 0.3.0 Native Preview</b><br>ガウシアンシーン研究ワークベンチ<br><br>Qt 6 ネイティブデスクトップ構成、ビルド日 %1。<br>ネイティブデスクトップのプレビューチャンネルです。安定版は main にあります。"
+  "<b>Gaussian Splatting Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。": {
+    "zh_CN": "<b>Gaussian Splatting Workbench 0.3.0 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %1。<br>当前为原生桌面预览通道；稳定版仍保留在 main。",
+    "en_US": "<b>Gaussian Splatting Workbench 0.3.0 Native Preview</b><br>Gaussian scene research workbench<br><br>Qt 6 native desktop architecture, built %1.<br>Native desktop preview channel; the stable release remains on main.",
+    "ja_JP": "<b>Gaussian Splatting Workbench 0.3.0 Native Preview</b><br>ガウシアンシーン研究ワークベンチ<br><br>Qt 6 ネイティブデスクトップ構成、ビルド日 %1。<br>ネイティブデスクトップのプレビューチャンネルです。安定版は main にあります。"
   },
   "主工具": {
     "zh_CN": "主工具",
@@ -3054,10 +3054,10 @@
     "en_US": "Confirm Exit",
     "ja_JP": "終了の確認"
   },
-  "确定要退出 Gaussian Scene Workbench Native 吗？": {
-    "zh_CN": "确定要退出 Gaussian Scene Workbench Native 吗？",
-    "en_US": "Exit Gaussian Scene Workbench Native?",
-    "ja_JP": "Gaussian Scene Workbench Native を終了しますか？"
+  "确定要退出 Gaussian Splatting Workbench Native 吗？": {
+    "zh_CN": "确定要退出 Gaussian Splatting Workbench Native 吗？",
+    "en_US": "Exit Gaussian Splatting Workbench Native?",
+    "ja_JP": "Gaussian Splatting Workbench Native を終了しますか？"
   },
   "退出前如有未保存进度，软件将继续询问是否保存。\n退出后会停止当前软件启动的训练、COLMAP、导入及其他后台进程。": {
     "zh_CN": "退出前如有未保存进度，软件将继续询问是否保存。\n退出后会停止当前软件启动的训练、COLMAP、导入及其他后台进程。",
@@ -7496,9 +7496,9 @@
   "仅清除文件窗口历史，不删除或修改文件。": {"zh_CN":"仅清除文件窗口历史，不删除或修改文件。","en_US":"Clear only file dialog history; do not delete or modify files.","ja_JP":"ファイルダイアログの履歴のみを消去します。ファイルは削除・変更されません。"},
   "缩放到光标": {"zh_CN":"缩放到光标","en_US":"Zoom to Cursor","ja_JP":"カーソル位置へズーム"},
   "滚轮围绕光标在视点目标平面上的位置缩放；关闭后围绕视图中心缩放。立即生效并记住选择，不修改模型坐标。": {"zh_CN":"滚轮围绕光标在视点目标平面上的位置缩放；关闭后围绕视图中心缩放。立即生效并记住选择，不修改模型坐标。","en_US":"The wheel zooms around the cursor on the view-target plane; when off, zoom around the view center. Applies immediately and remembers your choice without changing model coordinates.","ja_JP":"ホイールは注視点を通る平面上のカーソル位置を基準にズームします。無効にするとビューの中心を基準にします。即時に反映して選択を保存し、モデル座標は変更しません。"},
-  "<b>Gaussian Scene Workbench %1 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %2。<br>原生主程序：GPL-3.0-or-later；不提供任何担保。<br>Blender 操作柄几何保留原始 GPL 版权声明。<br>第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>对应源码及构建材料随安装包提供于 source 目录。": {
-    "zh_CN": "<b>Gaussian Scene Workbench %1 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %2。<br>原生主程序：GPL-3.0-or-later；不提供任何担保。<br>Blender 操作柄几何保留原始 GPL 版权声明。<br>第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>对应源码及构建材料随安装包提供于 source 目录。",
-    "en_US": "<b>Gaussian Scene Workbench %1 Native Preview</b><br>Gaussian scene research workbench<br><br>Qt 6 native desktop architecture, built %2.<br>Native main program: GPL-3.0-or-later; provided without any warranty.<br>Blender handle geometry retains its original GPL copyright notices.<br>Third-party training components retain their own licenses. See COPYING and native/LICENSE.md in the installation folder for full terms.<br>Corresponding source and build materials are provided in the package's source folder.",
-    "ja_JP": "<b>Gaussian Scene Workbench %1 Native Preview</b><br>ガウシアンシーン研究ワークベンチ<br><br>Qt 6 ネイティブデスクトップ構成、ビルド日 %2。<br>ネイティブ主プログラム：GPL-3.0-or-later。保証はありません。<br>Blender の操作ハンドル形状は元の GPL 著作権通知を保持します。<br>第三者の学習コンポーネントは各ライセンスを維持します。全文はインストール先の COPYING と native/LICENSE.md を参照してください。<br>対応するソースとビルド資料は配布物の source フォルダーに同梱します。"
+  "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %2。<br>原生主程序：GPL-3.0-or-later；不提供任何担保。<br>Blender 操作柄几何保留原始 GPL 版权声明。<br>第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>对应源码及构建材料随安装包提供于 source 目录。": {
+    "zh_CN": "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %2。<br>原生主程序：GPL-3.0-or-later；不提供任何担保。<br>Blender 操作柄几何保留原始 GPL 版权声明。<br>第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>对应源码及构建材料随安装包提供于 source 目录。",
+    "en_US": "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>Gaussian scene research workbench<br><br>Qt 6 native desktop architecture, built %2.<br>Native main program: GPL-3.0-or-later; provided without any warranty.<br>Blender handle geometry retains its original GPL copyright notices.<br>Third-party training components retain their own licenses. See COPYING and native/LICENSE.md in the installation folder for full terms.<br>Corresponding source and build materials are provided in the package's source folder.",
+    "ja_JP": "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>ガウシアンシーン研究ワークベンチ<br><br>Qt 6 ネイティブデスクトップ構成、ビルド日 %2。<br>ネイティブ主プログラム：GPL-3.0-or-later。保証はありません。<br>Blender の操作ハンドル形状は元の GPL 著作権通知を保持します。<br>第三者の学習コンポーネントは各ライセンスを維持します。全文はインストール先の COPYING と native/LICENSE.md を参照してください。<br>対応するソースとビルド資料は配布物の source フォルダーに同梱します。"
   }
 }

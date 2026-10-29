@@ -911,7 +911,6 @@ bool runLanguageFormMatrixSmokeTest(MainWindow &window) {
   check(write(meshPath, "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n3 0 1 2\n3 0 2 3\n"),
         "write owned model-export mesh fixture");
   if (!passed) return false;
-
   DatasetImportDialog import(root.path(), name, {photoPath}, root.path(), true, &window);
   ReconstructionDialog reconstruction(root.path(), QCoreApplication::applicationDirPath(), &window);
   TrainingDialog training(root.path(), name, root.path(), true, true, &window);
@@ -1009,6 +1008,19 @@ bool runLanguageSmokeTest(MainWindow &window) {
     if (!condition) { qCritical() << "Language smoke:" << description; passed = false; }
   };
   if (!passed) return false;
+  const auto checkBrandIdentity = [&] {
+    check(QGuiApplication::applicationDisplayName() ==
+              QStringLiteral("Gaussian Splatting Workbench Native"),
+          "current public product display name is independent of settings identity");
+    check(QCoreApplication::applicationName() == QStringLiteral("Gaussian Scene Workbench") &&
+              QCoreApplication::organizationName() == QStringLiteral("GaussianSceneWorkbench"),
+          "brand rename retains persistent application and organization settings identity");
+    const auto *about = window.findChild<QAction *>(QStringLiteral("aboutWorkbenchAction"));
+    check(about && about->text() == QCoreApplication::translate(
+              "Workbench", "关于 Gaussian Splatting Workbench"),
+          "About action uses the current formal brand in the current language");
+  };
+  checkBrandIdentity();
   const QStringList saveTexts = {QStringLiteral("保存工程"), QStringLiteral("Save Project"), QStringLiteral("プロジェクトを保存")};
   const QStringList pointTexts = {QStringLiteral("点云"), QStringLiteral("Point Cloud"), QStringLiteral("点群")};
   const auto *saveAction = window.findChild<QAction *>(QStringLiteral("saveProjectAction"));
@@ -1615,6 +1627,7 @@ bool runLanguageSmokeTest(MainWindow &window) {
     languageMenu->actions()[next]->trigger();
     QApplication::processEvents();
     check(AppLanguage::current() == language && AppLanguage::saved() == language, "immediate persisted language");
+    checkBrandIdentity();
     check(importCamerasAction && importCamerasAction->text() == QCoreApplication::translate("Workbench", "导入已知相机数据集…") &&
           cameraImport.windowTitle() == QCoreApplication::translate("Workbench", "导入已知相机数据集") &&
           cameraMode && cameraMode->currentText() == QCoreApplication::translate("Workbench", "已知相机数据集（锁定位姿）") &&

@@ -34,6 +34,28 @@ QByteArray batchFileHash(const QString &path) {
   return file.open(QIODevice::ReadOnly)
       ? QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256) : QByteArray();
 }
+bool batchActionCaptionsVisible(const QDialog &dialog) {
+  // These are the eight public actions outside the scrolling plan body. Keep
+  // their complete native captions, including disabled actions, at every width.
+  const auto buttons = dialog.findChildren<QPushButton *>(QString(), Qt::FindDirectChildrenOnly);
+  bool visible = buttons.size() == 8;
+  for (qsizetype index = 0; index < buttons.size(); ++index) {
+    const auto *button = buttons.at(index);
+    const QRect rectangle(button->mapTo(&dialog, QPoint()), button->size());
+    const QSize required = button->sizeHint();
+    const bool fits = button->isVisible() && dialog.rect().contains(rectangle) &&
+        button->width() >= required.width() && button->height() >= required.height();
+    if (!fits)
+      std::fprintf(stderr, "BATCH_ACTION_CAPTION: %s actual=%dx%d required=%dx%d inside=%d\n",
+          qPrintable(button->text()), button->width(), button->height(), required.width(), required.height(),
+          int(dialog.rect().contains(rectangle)));
+    visible = fits && visible;
+    for (qsizetype other = index + 1; other < buttons.size(); ++other)
+      visible = !rectangle.intersects(QRect(buttons.at(other)->mapTo(&dialog, QPoint()),
+                                           buttons.at(other)->size())) && visible;
+  }
+  return visible;
+}
 }
 bool runTrainingBatchSmokeTest() {
   bool passed = true;
@@ -111,8 +133,14 @@ bool runTrainingBatchSmokeTest() {
           {"inputSha256", inputHashes}, {"planSha256", QString::fromLatin1(batchFileHash(plan).toHex())},
           {"stateSha256", QString::fromLatin1(batchFileHash(statePath).toHex())}};
     };
+    const auto actionsVisible = [&]() {
+      const bool visible = batchActionCaptionsVisible(actual);
+      check(visible,
+          "every native action preserves its full caption size, remains inside the dialog and never overlaps at each locale/theme/width");
+      return visible;
+    };
     check(tests::captureUiFormMatrix(visualForms, actual, QStringLiteral("training-batch-plan-created"),
-        QSize(1100, 760), QSize(680, 620), snapshot),
+        QSize(1100, 760), QSize(680, 620), snapshot, actionsVisible),
         "native three-language light/dark wide/narrow evidence preserves both-backend plan, queue and input bytes without launching training");
   }
   TrainingBatchDialog reopened(python,root,workspace.path(),{},QProcessEnvironment::systemEnvironment());

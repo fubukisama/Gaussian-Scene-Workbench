@@ -10,6 +10,8 @@
 
 GSW has **component-specific licenses**. This is a reading guide, not a new license or a choice between MIT and GPL for every file.
 
+The product is now named **Gaussian Splatting Workbench**, formerly Gaussian Scene Workbench. Original notices retain their wording; the rename does not change their scope or grants.
+
 | Part | Applicable terms |
 | --- | --- |
 | Original native desktop main program | **GPL-3.0-or-later**, within the scope and exceptions in [native/LICENSE.md](../native/LICENSE.md). |
@@ -28,6 +30,8 @@ When redistributing binaries, follow the applicable licenses, including the GPL 
 
 GSW **按组件适用不同许可**。本页只是阅读指南，不新增授权，也不表示每个文件都能任选 MIT 或 GPL。
 
+产品现名为 **<span lang="en">Gaussian Splatting Workbench</span>**，原名为 <span lang="en">Gaussian Scene Workbench</span>。原始声明保留原文，改名不改变许可范围或既有授权。
+
 | 范围 | 适用条款 |
 | --- | --- |
 | 原创原生桌面主程序 | **GPL-3.0-or-later**，具体范围与例外见 [native/LICENSE.md](../native/LICENSE.md)。 |
@@ -45,6 +49,8 @@ GSW **按组件适用不同许可**。本页只是阅读指南，不新增授权
 ## 日本語
 
 GSW は**コンポーネントごとにライセンスが異なります**。本ページは読み方の案内であり、新たな許諾や全ファイルに対する MIT／GPL の選択権を与えるものではありません。
+
+現在の製品名は **<span lang="en">Gaussian Splatting Workbench</span>**（旧称：<span lang="en">Gaussian Scene Workbench</span>）です。元の通知文は保持し、改名によって許諾の範囲や既存の権利を変更しません。
 
 | 対象 | 適用条件 |
 | --- | --- |

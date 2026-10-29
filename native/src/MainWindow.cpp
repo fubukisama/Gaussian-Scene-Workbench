@@ -1398,7 +1398,7 @@ void MainWindow::createActions() {
   AppLanguage::bind(mOpenProjectAction, "toolTip", AppLanguage::source("打开工程"));
   connect(mOpenProjectAction, &QAction::triggered, this, [this]() {
     const QString filePath = QFileDialog::getOpenFileName(
-        this, QCoreApplication::translate("Workbench", "打开 Gaussian Scene Workbench 工程"), {},
+        this, QCoreApplication::translate("Workbench", "打开 Gaussian Splatting Workbench 工程"), {},
         QCoreApplication::translate("Workbench", "GSW Project (*.gsw.json);;JSON (*.json);;All files (*.*)"));
     if (!filePath.isEmpty()) {
       openProjectFile(filePath);
@@ -2250,12 +2250,13 @@ void MainWindow::createMenus() {
   if (auto *updateAction = findChild<QAction *>(QStringLiteral("nativeUpdateAction")))
     setWorkbenchActionIcon(updateAction, WorkbenchIconId::Refresh, palette());
   auto *aboutAction =
-      AppLanguage::text(helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench")), AppLanguage::source("关于 Gaussian Scene Workbench"));
+      AppLanguage::text(helpMenu->addAction(QCoreApplication::translate("Workbench", "关于 Gaussian Splatting Workbench")), AppLanguage::source("关于 Gaussian Splatting Workbench"));
+  aboutAction->setObjectName(QStringLiteral("aboutWorkbenchAction"));
   setWorkbenchActionIcon(aboutAction, WorkbenchIconId::Info, palette());
   connect(aboutAction, &QAction::triggered, this, [this]() {
     QMessageBox::about(
-        this, QCoreApplication::translate("Workbench", "关于 Gaussian Scene Workbench"),
-        QCoreApplication::translate("Workbench", "<b>Gaussian Scene Workbench %1 Native Preview</b><br>"
+        this, QCoreApplication::translate("Workbench", "关于 Gaussian Splatting Workbench"),
+        QCoreApplication::translate("Workbench", "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>"
             "高斯场景研究工作台<br><br>"
             "Qt 6 原生桌面架构，构建日期 %2。<br>"
             "原生主程序：GPL-3.0-or-later；不提供任何担保。<br>"
@@ -4478,7 +4479,7 @@ bool MainWindow::confirmExit() {
 
   QMessageBox prompt(
       QMessageBox::Question, QCoreApplication::translate("Workbench", "确认退出"),
-      QCoreApplication::translate("Workbench", "确定要退出 Gaussian Scene Workbench Native 吗？"),
+      QCoreApplication::translate("Workbench", "确定要退出 Gaussian Splatting Workbench Native 吗？"),
       QMessageBox::NoButton, this);
   prompt.setObjectName(QStringLiteral("exitConfirmationDialog"));
   prompt.setInformativeText(mProcessSupervisor.isPersistentTask()

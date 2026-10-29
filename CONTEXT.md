@@ -1,4 +1,4 @@
-# Gaussian Scene Workbench domain language
+# Gaussian Splatting Workbench domain language
 
 ## Recovery workspace
 

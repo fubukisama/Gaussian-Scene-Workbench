@@ -3,16 +3,16 @@
 
 [Setup]
 AppId={#GswAppId}
-AppName=Gaussian Scene Workbench
+AppName=Gaussian Splatting Workbench
 AppVersion={#GswVersion}
-AppVerName=Gaussian Scene Workbench {#GswVersion}
+AppVerName=Gaussian Splatting Workbench {#GswVersion}
 AppPublisher=Gaussian Scene Workbench contributors
 AppPublisherURL=https://github.com/fubukisama/Gaussian-Scene-Workbench
 AppSupportURL=https://github.com/fubukisama/Gaussian-Scene-Workbench/issues
 AppUpdatesURL=https://github.com/fubukisama/Gaussian-Scene-Workbench/releases
 DefaultDirName={code:GetDefaultInstallDir}
 UsePreviousAppDir=yes
-DefaultGroupName=Gaussian Scene Workbench
+DefaultGroupName=Gaussian Splatting Workbench
 AllowNoIcons=yes
 DisableProgramGroupPage=no
 DisableDirPage=no
@@ -25,7 +25,7 @@ WizardStyle=modern dynamic
 WizardSizePercent=120
 SetupIconFile={#GswIcon}
 UninstallDisplayIcon={app}\bin\Gaussian Scene Workbench.exe
-UninstallDisplayName=Gaussian Scene Workbench
+UninstallDisplayName=Gaussian Splatting Workbench
 LicenseFile={#GswPayload}\COPYING
 OutputDir={#GswOutput}
 OutputBaseFilename={#GswOutputName}
@@ -54,11 +54,14 @@ Source: "{#GswPayload}\gsw-owned-files.txt"; Flags: dontcopy
 Source: "{#GswPayload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Gaussian Scene Workbench"; Filename: "{app}\bin\Gaussian Scene Workbench.exe"; WorkingDir: "{app}"; AppUserModelID: "Fubukisama.GaussianSceneWorkbench.Native"
-Name: "{autodesktop}\Gaussian Scene Workbench"; Filename: "{app}\bin\Gaussian Scene Workbench.exe"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "Fubukisama.GaussianSceneWorkbench.Native"
+Name: "{group}\Gaussian Splatting Workbench"; Filename: "{app}\bin\Gaussian Scene Workbench.exe"; WorkingDir: "{app}"; AppUserModelID: "Fubukisama.GaussianSceneWorkbench.Native"
+Name: "{autodesktop}\Gaussian Splatting Workbench"; Filename: "{app}\bin\Gaussian Scene Workbench.exe"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "Fubukisama.GaussianSceneWorkbench.Native"
 
 ; No [Run], [UninstallDelete], environment modifications or training launch.
 ; Inno's uninstall log removes installed files only, preserving user-added data.
+; Branding changes labels only. Keep the existing AppId, executable and default
+; installation directory so older registered installs remain upgradeable.
+; Do not delete or rename existing user-customized legacy shortcuts.
 [Code]
 function GetDriveTypeW(lpRootPathName: String): LongWord;
   external 'GetDriveTypeW@kernel32.dll stdcall';

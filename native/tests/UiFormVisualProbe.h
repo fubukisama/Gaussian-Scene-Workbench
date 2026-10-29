@@ -105,7 +105,8 @@ inline bool hasUiFormCapture(const QWidget &window, const QString &state,
 // This probe never accepts/rejects the dialog, edits data or starts a helper.
 inline bool captureUiFormMatrix(const bool visual, QWidget &window, const QString &phase,
                                 const QSize &standard, const QSize &narrow,
-                                const std::function<QJsonObject()> &snapshot) {
+                                const std::function<QJsonObject()> &snapshot,
+                                const std::function<bool()> &validateLayout = {}) {
   if (!visual) return true;
   if (qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
       QApplication::platformName() != QStringLiteral("windows") ||
@@ -150,14 +151,16 @@ inline bool captureUiFormMatrix(const bool visual, QWidget &window, const QStrin
           captured = hasUiFormCapture(window, synthetic, locale, theme);
         }
         const bool unchanged = snapshot() == original;
+        const bool layoutUsable = !validateLayout || validateLayout();
         const bool native = window.isVisible() && window.windowHandle() &&
                             window.windowHandle()->isExposed() && window.size() == target;
         qInfo().noquote() << "UI_FORM_MATRIX" << phase << locale
                          << (theme == UiTheme::Light ? "light" : "dark")
                          << (isNarrow ? "narrow" : "standard")
                          << "native" << native << "captured" << captured
+                         << "layoutUsable" << layoutUsable
                          << "publicSnapshotUnchanged" << unchanged;
-        passed = captured && native && unchanged && passed;
+        passed = captured && native && layoutUsable && unchanged && passed;
       }
     }
   }

@@ -545,13 +545,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Verify controlled artifact tree before allowing hidden source files
+        shell: pwsh
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
+            --root "$PWD/native/artifact" --output "$env:RUNNER_TEMP/gsw-native-artifact-staged.json"
+          if($LASTEXITCODE -ne 0){throw 'Controlled native artifact tree or corresponding source is invalid.'}
+
       - name: Upload Windows preview
+        id: native-preview-upload
         uses: actions/upload-artifact@v7
         with:
           name: Gaussian-Scene-Workbench-0.3.1-native-preview-win-x64
           path: native/artifact/
+          # The controlled, checked payload needs .gitignore/.gitmodules and
+          # source/.github. Actual .git metadata and reparse points are rejected
+          # above; do not enable this on a repository/workspace-wide upload.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+      - name: Download the published preview artifact for independent readback
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.native-preview-upload.outputs.artifact-id }}
+          path: ${{ runner.temp }}/gsw-native-artifact-downloaded
+          digest-mismatch: error
+
+      - name: Verify actual downloaded package and corresponding source bytes
+        shell: pwsh
+        run: |
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
+            --root "$env:RUNNER_TEMP/gsw-native-artifact-downloaded" --baseline "$PWD/native/artifact" `
+            --output "$env:RUNNER_TEMP/gsw-native-artifact-roundtrip.json"
+          if($LASTEXITCODE -ne 0){throw 'Published artifact round-trip failed; do not deliver this artifact.'}
+          & '${{ steps.qa-python.outputs.python-path }}' -I -B scripts/verify_native_backend.py `
+            --root "$env:RUNNER_TEMP/gsw-native-artifact-downloaded" --package
+          if($LASTEXITCODE -ne 0){throw 'Downloaded package native-only boundary failed.'}
+
+      - name: Retain native artifact round-trip receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-artifact-roundtrip-receipts
+          path: ${{ runner.temp }}/gsw-native-artifact-*.json
+          if-no-files-found: warn
+          retention-days: 14
 
       # Keep a failed run failed, but retain binaries and logs for reproducing
       # rendering failures on a workstation with a hardware OpenGL driver.

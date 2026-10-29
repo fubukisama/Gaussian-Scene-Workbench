@@ -184,6 +184,7 @@ private slots:
   void clampsManualScaleToSupportedRange();
   void freezesSharedActionRolesAndPaletteSemantics();
   void paintsSharedRolesAndTransparentLayoutLabels();
+  void paintsTableCornerLikeTheHeader();
   void keepsKeyboardFocusAndInteractionGeometryStable();
 
 private:
@@ -1255,6 +1256,27 @@ void AppThemeTests::paintsSharedRolesAndTransparentLayoutLabels() {
     QVERIFY(check.isChecked());
     QVERIFY(!QSettings().contains(QStringLiteral("ui/theme")));
     dialog.hide();
+  }
+}
+
+void AppThemeTests::paintsTableCornerLikeTheHeader() {
+  for (const UiTheme theme : {UiTheme::Light, UiTheme::Dark}) {
+    for (const int scale : {90, 100, 150}) {
+      AppTheme::applyTheme(*qApp, theme, false);
+      AppTheme::apply(*qApp, scale, false);
+      QTableWidget table(2, 2);
+      table.setHorizontalHeaderLabels({QStringLiteral("A"), QStringLiteral("B")});
+      table.resize(360, 200);
+      table.show();
+      QCoreApplication::processEvents();
+      const QColor expected(theme == UiTheme::Dark ? "#24272a" : "#dedede");
+      const QPoint corner(table.verticalHeader()->width() / 2,
+                          table.horizontalHeader()->height() / 2);
+      QCOMPARE(pixelAt(painted(table), corner), expected);
+      QCOMPARE(table.rowCount(), 2);
+      QCOMPARE(table.columnCount(), 2);
+      table.hide();
+    }
   }
 }
 

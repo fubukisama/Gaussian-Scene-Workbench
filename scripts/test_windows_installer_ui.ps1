@@ -333,6 +333,9 @@ try {
     }
     $process = [Diagnostics.Process]::Start($start)
     $wizard = Wait-Wizard $process.Id
+    if (-not $wizard.Text.Contains('Gaussian Splatting Workbench')) {
+      throw 'The test-owned installer title does not show the current product display name.'
+    }
     $pattern = $patterns[$locale]
     [void](Capture-Page $wizard $locale 'welcome')
     [void](Get-Button $wizard $pattern.cancel)
@@ -405,7 +408,7 @@ try {
     if (-not $confirmed -and -not $process.HasExited) { throw 'No unique test-owned IDYES cancellation confirmation appeared; no force termination was attempted.' }
     if (-not $process.WaitForExit(10000)) { throw 'Wizard did not cancel cleanly; no force termination was attempted.' }
     if (Test-Path -LiteralPath (Join-Path $directory 'bin/Gaussian Scene Workbench.exe')) { throw 'UI-only acceptance unexpectedly installed the program.' }
-    $report.locales += [pscustomobject]@{ locale=$locale; welcome=$true; license=$true; runtime=$true; directory=$true; back=$true; cancel=$true; exitCode=$process.ExitCode }
+    $report.locales += [pscustomobject]@{ locale=$locale; brandInCaption=$true; welcome=$true; license=$true; runtime=$true; directory=$true; back=$true; cancel=$true; exitCode=$process.ExitCode }
     $process.Dispose()
     $process = $null
     Write-Output "Remote installer navigation/language checks passed: $locale; page captions require screenshot review."

@@ -714,7 +714,7 @@ ModelExportResult exportModelFile(const ModelExportOptions &o) {
     if (info.faceCount) attributes["NORMAL"] = accessor(12, "VEC3");
     if (info.textureCoordinates) attributes["TEXCOORD_0"] = accessor(40, "VEC2");
     QJsonObject pbr{{"baseColorFactor", QJsonArray{1, 1, 1, 1}}, {"metallicFactor", 0}, {"roughnessFactor", 1}};
-    QJsonObject root{{"asset", QJsonObject{{"version", "2.0"}, {"generator", "Gaussian Scene Workbench"}}}};
+    QJsonObject root{{"asset", QJsonObject{{"version", "2.0"}, {"generator", "Gaussian Splatting Workbench"}}}};
     if (info.textureCoordinates) {
       const qint64 imageOffset = bin.pos();
       if (!sourceTexture.save(&bin, "PNG")) return fail(QCoreApplication::translate("Workbench", "Unable to encode the GLB texture."));

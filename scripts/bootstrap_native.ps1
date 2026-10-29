@@ -482,7 +482,7 @@ function Ensure-3DGSSubmodulePaths {
   Write-Step "OK: 3DGS extension path file -> $pth"
 }
 
-Write-Step "Gaussian Scene Workbench setup started."
+Write-Step "Gaussian Splatting Workbench setup started."
 Write-Step "Root: $Root"
 $script:RuntimeRoot = Resolve-RuntimeRoot
 $script:MiniforgeRoot = Join-Path $script:RuntimeRoot "miniforge3"

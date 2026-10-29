@@ -4,6 +4,7 @@
 #include <QProcessEnvironment>
 #include <memory>
 class QCloseEvent;
+class QResizeEvent;
 namespace gsw {
 class InitializationDialog final : public QDialog {
   Q_OBJECT
@@ -31,6 +32,7 @@ signals:
 protected:
   void reject() override;
   void closeEvent(QCloseEvent *) override;
+  void resizeEvent(QResizeEvent *) override;
 private:
   class State; std::unique_ptr<State> m;
   void invalidate();
@@ -38,6 +40,7 @@ private:
   void finishProcess(int exitCode, bool normalExit);
   void readOutput(bool standardError);
   void refresh();
+  void adaptLayout();
   void fail(const char *source, const QString &detail = {});
 };
 }
