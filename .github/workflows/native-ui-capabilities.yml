@@ -1,0 +1,39 @@
+name: Native UI Remote Capabilities (inventory only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-capabilities:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+      - name: Create fresh D-drive evidence directory
+        shell: pwsh
+        run: |
+          $root = Join-Path 'D:/a/_temp' ('gsw-capabilities-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
+          $temporary = Join-Path $root 'temp'
+          New-Item -ItemType Directory -Path $temporary -ErrorAction Stop | Out-Null
+          "GSW_CAPABILITIES_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TEMP=$temporary" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$temporary" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Read hardware and native Windows display metadata
+        shell: pwsh
+        run: |
+          # No product build/application, Mesa, resolution override, drivers,
+          # registry edits, RDP session or workload is started by this job.
+          ./scripts/probe_native_ci_capabilities.ps1 -OutputPath (Join-Path $env:GSW_CAPABILITIES_ROOT 'resource-snapshot.json')
+      - name: Upload redacted inventory (not acceptance)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-ui-capabilities-${{ github.sha }}
+          path: ${{ env.GSW_CAPABILITIES_ROOT }}/resource-snapshot.json
+          if-no-files-found: error
+          retention-days: 14

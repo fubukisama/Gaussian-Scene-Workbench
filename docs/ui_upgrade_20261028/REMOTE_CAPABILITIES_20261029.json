@@ -1,0 +1,128 @@
+{
+  "schema": "gsw.remote_capability_audit/1",
+  "auditedUtc": "2026-10-29T04:52:35.8516463Z",
+  "repository": "fubukisama/Gaussian-Scene-Workbench",
+  "checkoutCommitAtAudit": "e48d535683d5d5269e422971e53c7ea104f9fd4e",
+  "scope": "remote capability discovery; not product, hardware or promotion acceptance",
+  "privacy": {
+    "runnerNamesOmitted": true,
+    "hostnamesOmitted": true,
+    "deviceIdentifiersOmitted": true,
+    "projectNamesAndPathsOmitted": true,
+    "credentialsAndEnvironmentDumpOmitted": true
+  },
+  "repositorySelfHostedRunners": {
+    "source": "GET /repos/fubukisama/Gaussian-Scene-Workbench/actions/runners",
+    "status": "observed",
+    "totalCount": 0,
+    "runners": [],
+    "scopeLimit": "repository-visible registration only; not all account or cloud hardware"
+  },
+  "codexSavedProjectMetadata": {
+    "source": "Codex list_projects metadata; no application/host execution",
+    "status": "observed",
+    "projectCount": 34,
+    "localProjects": 17,
+    "chatgptProjects": 17,
+    "localHostEntries": 17,
+    "unspecifiedHostEntries": 17,
+    "nonlocalHostEntries": 0,
+    "remoteExecutionEnvironmentEstablished": false,
+    "scopeLimit": "saved projects do not enumerate every possible service; unspecified is not a remote Windows test host"
+  },
+  "githubLargerOrGpuRunners": {
+    "entitlement": "not_queried",
+    "configuredRunnerLabel": null,
+    "availableForThisTask": null,
+    "rentalOrBillingChangesMade": false
+  },
+  "historicalNativeWindowEvidence": {
+    "sourceCommit": "de764f0a5ef3a8e813ec38ed19e3f232e4c83fbe",
+    "runId": "40663272343",
+    "runUrl": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40663272343",
+    "localEvidenceRoot": "D:/Codex/validation/gsw-ui-upgrade-20261028/candidate-run40663272343",
+    "captureRecordCount": 20,
+    "allRecordsDeclareControlledDprOnly": true,
+    "observedWindowsWindowDpi": [96],
+    "observedQtWidgetDpr": [1, 1.25, 1.5, 1.75, 2],
+    "observedOpenGl": {
+      "vendor": "Mesa",
+      "renderer": "llvmpipe (LLVM 23.1.2, 256 bits)",
+      "version": "4.6 (Core Profile) Mesa 26.2.4 (git-9a0169f2a7)",
+      "qtVersion": "6.8.3"
+    },
+    "representativeNativeWindowPhysicalImageSize": [1600, 936],
+    "actualMonitorCount": null,
+    "actualDesktopResolution": null,
+    "hashes": {
+      "source-run.json": "52d9b6cc5ad617aa72a21d5a663fa5547db9c32f548a6ba9fb65c13cd34fa841",
+      "d1-s0-dark/capture.json": "4669e99833193b35b26af8baf4e15ebfc0bfe54a7cba8adb2015e5345e9b27a4",
+      "d1-s0-dark/manifest.json": "74ed1ca63497e0bc1deafcb0cbffc9adfddf58e561034234525550eb2f1e759e"
+    },
+    "scopeLimit": "historical exact binary only, not latest-main acceptance; physical screenshot dimensions do not prove desktop topology"
+  },
+  "existingCiHelpersAtAudit": {
+    "display": {
+      "file": "scripts/setup_native_ci_display.ps1",
+      "sha256": "ed1ded12bd439bb361de00d4967b9b26e4799dedd07d1b52dfc1586bfcf57be2",
+      "supportedScope": "CDS_TEST and supported primary resolution change on ephemeral CI",
+      "preferredPhysicalResolution": [1920, 1080],
+      "minimumAcceptedPhysicalResolution": [1600, 900],
+      "setsOsScale": false,
+      "createsAdditionalMonitor": false
+    },
+    "graphics": {
+      "file": "scripts/setup_native_ci_graphics.ps1",
+      "sha256": "8ce8e7b35bfb2faeb33e4675c2cafa123a15e355902b27e4a51fa0da3c1bdfd8",
+      "provider": "pinned Mesa 26.2.4 llvmpipe",
+      "provesNvidiaRuntime": false,
+      "provesDedicatedVram": false
+    }
+  },
+  "capabilityBoundary": {
+    "remoteControlledQtDprSoftwareGl": "verified_historical_candidate_only",
+    "nativeOsScale100Percent": "observed_historical_candidate_only",
+    "nativeOsScale125Percent": "not_tested",
+    "nativeOsScale150Percent": "not_tested",
+    "nativeOsScale175Percent": "not_tested",
+    "nativeOsScale200Percent": "not_tested",
+    "realCrossMonitorTransition": "not_tested_no_confirmed_remote_topology",
+    "nvidiaOpenGlRuntime": "not_tested_no_confirmed_authorized_remote_gpu",
+    "actualResidentVram": "not_tested",
+    "runtimeUsableGpuCount": null,
+    "fullAcceptance": false,
+    "promotionAllowed": false
+  },
+  "preparedReadOnlyProbe": {
+    "script": "scripts/probe_native_ci_capabilities.ps1",
+    "workflow": ".github/workflows/native-ui-capabilities.yml",
+    "status": "prepared_not_run_pending_parent_review",
+    "trigger": "workflow_dispatch only",
+    "runner": "windows-2022",
+    "productBuildOrApplicationLaunch": false,
+    "displayScaleResolutionOrDriverMutation": false,
+    "newDependenciesInstalled": false,
+    "canCloseProductAcceptanceGates": false,
+    "output": "fresh D-drive resource-snapshot.json with inventory/runtime-unknown distinction"
+  },
+  "rdpScalingAssessment": {
+    "officialProperty": "desktopscalefactor",
+    "documentedRequestedValues": [100, 125, 150, 175, 200],
+    "officialDeprecationWarning": true,
+    "configuredAuthenticatedRemoteSessionFound": false,
+    "availableWorkingRecipeVerified": false,
+    "displayOrSessionChangesMade": false,
+    "requiredProof": "owned per-monitor-aware window DPI 96/120/144/168/192 plus exact candidate Qt/native-window metadata without QT_SCALE_FACTOR; requested RDP value alone is not proof"
+  },
+  "consolidatedQuestionForParentOnly": "是否提供并授权一台隔离的 Windows NVIDIA 远端测试机，具备真实 100/125/150/175/200% OS 缩放和至少两个可独立缩放的显示输出，用于一次有界 UI/GPU/VRAM 验收？如暂无此环境，NVIDIA、原生非 100% 缩放和跨屏保持未验，不激活本地候选。",
+  "sources": [
+    "https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository",
+    "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+    "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdpiforwindow",
+    "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext",
+    "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaymonitors",
+    "https://learn.microsoft.com/en-us/azure/virtual-desktop/rdp-properties",
+    "https://docs.nvidia.com/deploy/nvidia-smi/index.html",
+    "https://doi.org/10.48550/arXiv.2609.00065"
+  ]
+}
