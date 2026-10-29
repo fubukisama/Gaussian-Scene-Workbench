@@ -2,6 +2,15 @@
   "schema": "gsw.ui_c3e_full_scoped_evidence/1",
   "auditedUtc": "2026-10-29T06:49:23Z",
   "status": "QT_JOB_SUCCESS_UPSTREAM_SUCCESS_CODEQL_PENDING_AT_OBSERVATION",
+  "laterRootFollowup": {
+    "observedUtc": "2026-10-29T07:18:25Z",
+    "runStatus": "completed",
+    "runConclusion": "success",
+    "qtJobConclusion": "success",
+    "upstreamJobConclusion": "success",
+    "codeQlJobConclusion": "success",
+    "meaning": "Exact c3e full CI completed; earlier audit snapshot retained. Not acceptance of newer source or full UI/hardware/performance scope."
+  },
   "sourceCommit": "c3e667a249e0de1b4384aa3d97d29172e08a474b",
   "sourceTree": "59d195a88b50ee9e2685c81998f5a74f302dd0a6",
   "repositoryId": 1286130219,

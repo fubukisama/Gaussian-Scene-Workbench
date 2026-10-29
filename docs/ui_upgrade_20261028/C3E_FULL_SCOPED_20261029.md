@@ -1,5 +1,11 @@
 # c3e Native Windows — scoped Qt / package-readback evidence
 
+Root follow-up at **2026-10-29 07:18 UTC**: the exact same c3e run40823880544
+has now completed with **all three jobs SUCCESS**, including CodeQL123282342250.
+The original 06:49 audit snapshot below is retained, not rewritten. This closes
+that exact candidate's full CI gate, not later-source/full-UI/hardware/performance
+or local-delivery acceptance; no additional large package was downloaded.
+
 Audit snapshot: **2026-10-29 06:49 UTC**. Status is
 **QT_JOB_SUCCESS / UPSTREAM_SUCCESS / CODEQL_PENDING_AT_OBSERVATION /
 NOT_FULL_ACCEPTANCE / NOT_DELIVERED**. This is a historical exact-candidate
