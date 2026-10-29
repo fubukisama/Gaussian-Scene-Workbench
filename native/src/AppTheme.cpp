@@ -523,7 +523,7 @@ QTreeView::item:focus, QTableView::item:focus, QListView::item:focus {
   outline-offset: -1px;
 }
 QHeaderView, QHeaderView QWidget#qt_scrollarea_viewport { background: @HEADER@; }
-QHeaderView::section {
+QHeaderView::section, QTableCornerButton::section {
   background: @HEADER@;
   color: @HEADER_TEXT@;
   border: 0;

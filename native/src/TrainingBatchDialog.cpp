@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLayout>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
@@ -32,6 +33,77 @@
 namespace gsw {
 namespace {
 constexpr qint64 MaximumBytes = 16 * 1024 * 1024;
+// Keep full native captions in each action group. Unlike a fixed horizontal
+// row, this layout never squeezes a localized button below its own size hint.
+class BatchActionFlow final : public QLayout {
+public:
+  explicit BatchActionFlow(bool alignRight = false) : mAlignRight(alignRight) {
+    setContentsMargins(0, 0, 0, 0);
+    setSpacing(6);
+  }
+  ~BatchActionFlow() override { while (auto *item = takeAt(0)) delete item; }
+  void addItem(QLayoutItem *item) override { mItems.append(item); invalidate(); }
+  int count() const override { return int(mItems.size()); }
+  QLayoutItem *itemAt(int index) const override { return mItems.value(index, nullptr); }
+  QLayoutItem *takeAt(int index) override {
+    return index >= 0 && index < mItems.size() ? mItems.takeAt(index) : nullptr;
+  }
+  Qt::Orientations expandingDirections() const override { return Qt::Horizontal; }
+  bool hasHeightForWidth() const override { return true; }
+  int heightForWidth(int width) const override { return arrange(QRect(0, 0, width, 0), false); }
+  QSize sizeHint() const override {
+    QSize result(0, 0);
+    for (auto *item : mItems) {
+      const QSize hint = actionSize(item);
+      result.setWidth(result.width() + (result.width() ? spacing() : 0) + hint.width());
+      result.setHeight(std::max(result.height(), hint.height()));
+    }
+    return result;
+  }
+  QSize minimumSize() const override {
+    QSize result(0, 0);
+    for (auto *item : mItems) result = result.expandedTo(actionSize(item));
+    return result;
+  }
+  void setGeometry(const QRect &rectangle) override {
+    QLayout::setGeometry(rectangle);
+    arrange(rectangle, true);
+  }
+private:
+  static QSize actionSize(const QLayoutItem *item) {
+    const auto *widget = item->widget();
+    return widget ? widget->sizeHint().expandedTo(widget->minimumSizeHint()) : item->sizeHint();
+  }
+  int arrange(const QRect &rectangle, bool apply) const {
+    int top = rectangle.top(), rowWidth = 0, rowHeight = 0;
+    qsizetype rowStart = 0;
+    const auto finishRow = [&](qsizetype end) {
+      if (!apply) return;
+      int left = rectangle.left() + (mAlignRight ? std::max(0, rectangle.width() - rowWidth) : 0);
+      for (qsizetype index = rowStart; index < end; ++index) {
+        const QSize hint = actionSize(mItems.at(index));
+        mItems.at(index)->setGeometry(QRect(left, top, hint.width(), rowHeight));
+        left += hint.width() + spacing();
+      }
+    };
+    for (qsizetype index = 0; index < mItems.size(); ++index) {
+      const QSize hint = actionSize(mItems.at(index));
+      const int nextWidth = rowWidth + (rowWidth ? spacing() : 0) + hint.width();
+      if (index > rowStart && nextWidth > rectangle.width()) {
+        finishRow(index);
+        top += rowHeight + spacing();
+        rowStart = index;
+        rowWidth = rowHeight = 0;
+      }
+      rowWidth += (rowWidth ? spacing() : 0) + hint.width();
+      rowHeight = std::max(rowHeight, hint.height());
+    }
+    finishRow(mItems.size());
+    return mItems.isEmpty() ? 0 : top - rectangle.top() + rowHeight;
+  }
+  QList<QLayoutItem *> mItems;
+  bool mAlignRight;
+};
 QString batchText(const char *source) { return QCoreApplication::translate("Workbench", source); }
 QString encoded(const QJsonValue &value) {
   const auto bytes = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
@@ -168,14 +240,15 @@ TrainingBatchDialog::TrainingBatchDialog(const QString &python, const QString &b
   m->refresh->setObjectName(QStringLiteral("batchRefreshHistoryButton")); m->loadPlan->setObjectName(QStringLiteral("batchLoadPlanButton"));
   historyButtons->addWidget(m->refresh); historyButtons->addWidget(m->loadPlan); historyButtons->addStretch(); layout->addLayout(historyButtons);
   scroll->setWidget(body); root->addWidget(scroll,1);
-  auto *fileButtons = new QHBoxLayout;
+  auto *fileButtons = new BatchActionFlow;
   m->load = AppLanguage::text(new QPushButton(this), AppLanguage::source("导入批量请求…"));
   m->save = AppLanguage::text(new QPushButton(this), AppLanguage::source("保存批量请求…"));
   m->preview = AppLanguage::text(new QPushButton(this), AppLanguage::source("预览并核验数据身份"));
   m->create = AppLanguage::text(new QPushButton(this), AppLanguage::source("创建持久计划"));
   m->preview->setObjectName(QStringLiteral("batchPreviewButton")); m->create->setObjectName(QStringLiteral("batchCreateButton"));
-  for (auto *button : {m->load,m->save}) fileButtons->addWidget(button); fileButtons->addStretch(); for (auto *button : {m->preview,m->create}) fileButtons->addWidget(button); root->addLayout(fileButtons);
-  auto *runButtons = new QHBoxLayout; runButtons->addStretch();
+  for (auto *button : {m->load,m->save,m->preview,m->create}) fileButtons->addWidget(button);
+  root->addLayout(fileButtons);
+  auto *runButtons = new BatchActionFlow(true);
   m->start = AppLanguage::text(new QPushButton(this), AppLanguage::source("启动所选批量计划")); m->start->setObjectName(QStringLiteral("batchStartButton"));
   m->resume = AppLanguage::text(new QPushButton(this), AppLanguage::source("请求核验并继续批量计划")); m->resume->setObjectName(QStringLiteral("batchResumeButton"));
   m->observe = AppLanguage::text(new QPushButton(this), AppLanguage::source("观察批量队列")); m->observe->setObjectName(QStringLiteral("batchObserveButton"));

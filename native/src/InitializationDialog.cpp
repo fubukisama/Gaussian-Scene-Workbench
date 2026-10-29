@@ -21,6 +21,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSet>
 #include <QSignalBlocker>
@@ -31,6 +32,7 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #include <array>
+#include <algorithm>
 #include <cmath>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -133,6 +135,7 @@ public:
   QString python, backendRoot, workspace, dataset, identity, operation, reportPath, outputPath, versionPath;
   QProcessEnvironment environment; QJsonObject original, report, runRequest; QByteArray output, errors;
   InitializationEditor *editor = nullptr; InitializationPreview *preview = nullptr; QWidget *inputs = nullptr;
+  QSplitter *split = nullptr; QScrollArea *inputScroll = nullptr;
   QComboBox *backend = nullptr, *resolution = nullptr, *method = nullptr, *depthView = nullptr, *projection = nullptr, *view = nullptr;
   std::array<QLineEdit *, 3> extent{}; QLineEdit *nearDepth = nullptr, *farDepth = nullptr;
   QLabel *summary = nullptr; QTableWidget *coverage = nullptr; QPlainTextEdit *details = nullptr;
@@ -169,8 +172,11 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   layout->addWidget(bodyScroll, 1);
   auto *source = new QLabel(QDir::toNativeSeparators(datasetPath) + QLatin1Char('\n') + identity, body);
   source->setTextFormat(Qt::PlainText); source->setWordWrap(true); bodyLayout->addWidget(source);
-  auto *split = new QSplitter(Qt::Horizontal, body); split->setChildrenCollapsible(false); bodyLayout->addWidget(split, 1);
-  auto *scroll = new QScrollArea(split); scroll->setWidgetResizable(true);
+  auto *split = new QSplitter(Qt::Horizontal, body); m->split = split;
+  split->setObjectName(QStringLiteral("initializationPanels"));
+  split->setChildrenCollapsible(false); bodyLayout->addWidget(split, 1);
+  auto *scroll = new QScrollArea(split); m->inputScroll = scroll;
+  scroll->setObjectName(QStringLiteral("initializationInputScroll")); scroll->setWidgetResizable(true);
   m->inputs = new QWidget(scroll); m->inputs->setProperty("gswLayoutContainer", true); scroll->setWidget(m->inputs);
   auto *left = new QVBoxLayout(m->inputs); m->editor = new InitializationEditor(false, m->inputs);
   const QFileInfo input(datasetPath);
@@ -284,9 +290,30 @@ InitializationDialog::InitializationDialog(const QString &python, const QString 
   connect(m->timeout, &QTimer::timeout, this, [this] {
     m->failure = AppLanguage::source("初始化检查超时，正在取消本窗口的辅助进程；训练与原数据未改动。"); cancelOperation();
   });
-  AppLanguage::onChanged(this, [this] { refresh(); });
+  AppLanguage::onChanged(this, [this] { refresh(); adaptLayout(); });
   setRequestDocument({{"schema", "gsw.initialization_request/1"}, {"input_data_identity", identity},
       {"backend", "3dgs"}, {"resolution", 1}, {"initialization", initialization}});
+  adaptLayout();
+}
+void InitializationDialog::resizeEvent(QResizeEvent *event) {
+  QDialog::resizeEvent(event);
+  adaptLayout();
+}
+void InitializationDialog::adaptLayout() {
+  if (!m->split || !m->inputScroll || !m->inputs) return;
+  // A clipped horizontal form is not made usable by a scrollbar below another
+  // scrollbar. Stack the two panels on narrow windows and let the existing
+  // outer body own vertical scrolling; never reduce the font or hide fields.
+  const bool narrow = width() < std::max(900, fontMetrics().horizontalAdvance(QLatin1Char('M')) * 90);
+  const Qt::Orientation orientation = narrow ? Qt::Vertical : Qt::Horizontal;
+  for (auto *form : m->inputs->findChildren<QFormLayout *>())
+    form->setRowWrapPolicy(narrow ? QFormLayout::WrapAllRows : QFormLayout::WrapLongRows);
+  const bool changed = m->split->orientation() != orientation;
+  if (changed) m->split->setOrientation(orientation);
+  if (m->inputs->layout()) m->inputs->layout()->activate();
+  m->inputScroll->setVerticalScrollBarPolicy(narrow ? Qt::ScrollBarAlwaysOff : Qt::ScrollBarAsNeeded);
+  m->inputScroll->setMinimumHeight(narrow ? m->inputs->sizeHint().height() + 2 * m->inputScroll->frameWidth() : 0);
+  if (changed) m->split->setSizes(narrow ? QList<int>{m->inputScroll->minimumHeight(), 420} : QList<int>{500, 600});
 }
 InitializationDialog::~InitializationDialog() {
   if (m->process->state() != QProcess::NotRunning) {

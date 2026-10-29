@@ -1,0 +1,91 @@
+name: Native Artifact Roundtrip
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-artifact-roundtrip.yml'
+      - '.github/workflows/native-windows.yml'
+      - 'scripts/verify_native_artifact.py'
+      - 'scripts/prepare_native_artifact_fixture.py'
+      - 'scripts/test_native_artifact.py'
+
+permissions:
+  contents: read
+
+jobs:
+  hidden-source-roundtrip:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: qa
+        with:
+          python-version: '3.12'
+      - name: Prepare owned non-executable byte fixture
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/test_native_artifact.py
+          if($LASTEXITCODE -ne 0){throw 'Artifact verifier public CLI contracts failed.'}
+          $evidence=Join-Path $env:RUNNER_TEMP 'gsw-artifact-roundtrip'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          "GSW_ARTIFACT_ROUNDTRIP=$evidence" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/prepare_native_artifact_fixture.py --root "$evidence/expected"
+          if($LASTEXITCODE -ne 0){throw 'Artifact fixture preparation failed.'}
+      - name: Upload negative control with the previous default filter
+        uses: actions/upload-artifact@v7
+        id: filtered
+        with:
+          name: native-artifact-filtered-negative-control
+          path: ${{ runner.temp }}/gsw-artifact-roundtrip/expected/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.filtered.outputs.artifact-id }}
+          path: ${{ runner.temp }}/gsw-artifact-roundtrip/filtered
+          digest-mismatch: error
+      - name: Require the real filtered artifact to be rejected
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
+            --root "$env:GSW_ARTIFACT_ROUNDTRIP/filtered" --baseline "$env:GSW_ARTIFACT_ROUNDTRIP/expected" `
+            --output "$env:GSW_ARTIFACT_ROUNDTRIP/negative-control.json"
+          if($LASTEXITCODE -ne 2){throw 'The previous hidden-file filter did not reach the required red seam.'}
+          $receipt=Get-Content "$env:GSW_ARTIFACT_ROUNDTRIP/negative-control.json" -Raw|ConvertFrom-Json
+          if($receipt.status -cne 'FAIL' -or $receipt.error -notmatch 'manifest file missing: gaussian-splatting/\.git'){
+            throw 'The negative control failed for a different reason.'
+          }
+      - name: Upload controlled payload including required hidden source
+        uses: actions/upload-artifact@v7
+        id: complete
+        with:
+          name: native-artifact-complete-roundtrip-fixture
+          path: ${{ runner.temp }}/gsw-artifact-roundtrip/expected/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.complete.outputs.artifact-id }}
+          path: ${{ runner.temp }}/gsw-artifact-roundtrip/downloaded
+          digest-mismatch: error
+      - name: Verify actual downloaded bytes and both manifests
+        shell: pwsh
+        run: |
+          & '${{ steps.qa.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
+            --root "$env:GSW_ARTIFACT_ROUNDTRIP/downloaded" --baseline "$env:GSW_ARTIFACT_ROUNDTRIP/expected" `
+            --output "$env:GSW_ARTIFACT_ROUNDTRIP/roundtrip.json"
+          if($LASTEXITCODE -ne 0){throw 'Complete artifact round-trip failed.'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-artifact-roundtrip-evidence
+          path: ${{ runner.temp }}/gsw-artifact-roundtrip/*.json
+          if-no-files-found: error
+          retention-days: 14

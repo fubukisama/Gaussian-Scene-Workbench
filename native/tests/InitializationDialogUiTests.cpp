@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <cstdio>
@@ -75,6 +76,24 @@ int main(int argc,char **argv) {
     check(dialog.minimumSizeHint().isValid()&&dialog.minimumSizeHint().height()<=620,
         "the dialog layout minimum fits the unchanged 620-logical-pixel narrow-window contract");
   };
+  const auto inputsFitHorizontally=[&]{
+    auto *body=dialog.findChild<QScrollArea *>(QStringLiteral("initializationBodyScroll"));
+    auto *inputs=dialog.findChild<QScrollArea *>(QStringLiteral("initializationInputScroll"));
+    bool usable=body&&inputs&&body->horizontalScrollBar()->maximum()==0&&inputs->horizontalScrollBar()->maximum()==0;
+    const QStringList names={QStringLiteral("initializationKind"),QStringLiteral("initializationFrame"),
+      QStringLiteral("initializationCount"),QStringLiteral("initializationSeed"),
+      QStringLiteral("initializationBound00"),QStringLiteral("initializationBound01"),QStringLiteral("initializationBound02"),
+      QStringLiteral("initializationBound10"),QStringLiteral("initializationBound11"),QStringLiteral("initializationBound12")};
+    for(const QString &name:names){
+      auto *field=dialog.findChild<QWidget *>(name);
+      if(!field||!inputs){usable=false;continue;}
+      const QRect fieldRect(field->mapTo(inputs->viewport(),QPoint()),field->size());
+      usable=field->isVisibleTo(inputs->widget())&&fieldRect.left()>=0&&
+        fieldRect.right()<inputs->viewport()->width()&&fieldRect.width()>0&&usable;
+    }
+    check(usable,"all actual initialization fields retain their full horizontal edit area in every language/theme/window size");
+    return usable;
+  };
   auto request=dialog.requestDocument();
   auto depthRequest=request;depthRequest["suggestion"]=QJsonObject{{"method","user_depth_interval"},{"view_id","train-a"},{"near",2.},{"far",3.}};
   check(dialog.setRequestDocument(depthRequest)&&dialog.requestDocument()==depthRequest,"full reusable request retains explicit suggestion parameters");
@@ -107,7 +126,7 @@ int main(int argc,char **argv) {
   const auto report=dialog.report();for(const auto &locale:gsw::AppLanguage::supported()){check(gsw::AppLanguage::apply(locale,false),"native language applies immediately");check(dialog.requestDocument()==request&&dialog.report()==report,"three-language switching retains the request and actual worker report without rerunning");checkScrollBoundary();}
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-3dgs-ready"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
-        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+        {"report",dialog.report()},{"running",dialog.isRunning()}};},inputsFitHorizontally),
       "owned 3DGS initialization native surface matrix preserves its public request and actual CPU report");
   const QString saved=workspace.filePath(QStringLiteral("init-report.json"));check(dialog.saveReport(saved)&&!dialog.saveReport(saved),"report save is explicit and cannot overwrite older evidence");
   auto twoD=request;twoD["backend"]="2dgs";dialog.setRequestDocument(twoD);dialog.startInspection();
@@ -118,7 +137,7 @@ int main(int argc,char **argv) {
   checkScrollBoundary();
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-2dgs-ready"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
-        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+        {"report",dialog.report()},{"running",dialog.isRunning()}};},inputsFitHorizontally),
       "owned 2DGS initialization native surface matrix preserves its backend-specific CPU report and request");
   auto optical=request;optical["suggestion"]=QJsonObject{{"method","optical_axis_convergence"}};dialog.setRequestDocument(optical);dialog.requestSuggestion();
   check(waitFor([&]{return !dialog.isRunning();})&&dialog.report().value("status")=="needs_input"&&!dialog.report().contains("suggested_initialization"),
@@ -139,7 +158,7 @@ int main(int argc,char **argv) {
   checkScrollBoundary();
   check(gsw::tests::captureUiFormMatrix(visualForms,dialog,QStringLiteral("initializer-suggestion-pending"),
       QSize(1100,760),QSize(560,620),[&]{return QJsonObject{{"request",dialog.requestDocument()},
-        {"report",dialog.report()},{"running",dialog.isRunning()}};}),
+        {"report",dialog.report()},{"running",dialog.isRunning()}};},inputsFitHorizontally),
       "owned suggestion native surface matrix cannot adopt or publish the unconfirmed suggestion");
   auto *apply=dialog.findChild<QPushButton *>(QStringLiteral("initializationApplySuggestion"));
   check(apply&&apply->isEnabled()&&create&&!create->isEnabled(),"a suggestion cannot publish before explicit adoption and rechecking");
