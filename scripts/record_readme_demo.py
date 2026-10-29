@@ -580,14 +580,21 @@ def main() -> int:
         wait_for(lambda: owned(user32.GetForegroundWindow()), 'owned foreground')
         rect = wintypes.RECT()
         user32.GetClientRect(hwnd, ctypes.byref(rect))
-        outer = main_window.rectangle()
-        width = 1600 + outer.width() - rect.right
-        height = 936 + outer.height() - rect.bottom
+        # Qt UIA's bounding rectangle is the client, not the Win32 outer frame.
+        # Measure both in the same Win32 coordinate system, including borders.
+        outer = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(outer)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        width = 1600 + (outer.right - outer.left) - rect.right
+        height = 936 + (outer.bottom - outer.top) - rect.bottom
         if user32.GetSystemMetrics(0) < width + 16 or user32.GetSystemMetrics(1) < height + 16:
             raise RuntimeError('Real display is too small for an unscaled 1600x936 owned client capture')
         if not user32.SetWindowPos(hwnd, 0, 8, 8, width, height, 0x0040):
             raise ctypes.WinError(ctypes.get_last_error())
-        user32.GetClientRect(hwnd, ctypes.byref(rect))
+        def exact_client_size():
+            user32.GetClientRect(hwnd, ctypes.byref(rect))
+            return (rect.right, rect.bottom) == (1600, 936)
+        wait_for(exact_client_size, 'exact unscaled 1600x936 Win32 client dimensions', timeout=5)
         if (rect.right, rect.bottom) != (1600, 936):
             raise RuntimeError('Native client dimensions differ from 1600x936; no resize filter permitted')
         evidence['window'] = {'pid': app.pid, 'hwnd': int(hwnd), 'client_size': [1600, 936], 'exe': str(exe)}
