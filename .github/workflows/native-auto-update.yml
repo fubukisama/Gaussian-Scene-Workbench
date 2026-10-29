@@ -31,6 +31,7 @@ on:
       - 'native/i18n/catalog.json'
       - 'native/tests/NativeUpdate*'
       - 'native/tests/NativeActivation*'
+      - 'native/tests/NativeUpdateAutomaticFlowFixture.cpp'
       - 'native/tests/NativeBootstrap*'
       - 'packaging/updates/**'
       - 'scripts/*native_update*'
@@ -174,13 +175,16 @@ jobs:
       - name: Verify actual exact-source and locked registry closure without running payload
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path native/.tmp-source-proof -Force | Out-Null
+          New-Item -ItemType Directory -Path native/.tmp-source-proof,native/source-proof-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.source_closure_attempt/1';scope='source-only';result='STARTED';
+            production=false;payloadExecuted=false;sourceCommit=(git rev-parse HEAD).Trim();
+            runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json |
+            Set-Content native/source-proof-evidence/attempt.json
           $env:TEMP="$PWD/native/.tmp-source-proof"; $env:TMP=$env:TEMP
           rustup toolchain install 1.99.1 --profile minimal --no-self-update
           if($LASTEXITCODE -ne 0){throw 'Source-proof pinned Rust unavailable.'}
-          New-Item -ItemType Directory -Path native/source-proof-evidence -Force | Out-Null
           python -I -B scripts/verify_native_update_source_bundle.py --root D:/gs/pkg `
-            --repository "$PWD" --evidence "$PWD/native/source-proof-evidence" `
+            --repository "$PWD" --evidence "$PWD/native/source-proof-evidence/verification" `
             --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
             --cargo-home D:/gu/c 2>&1 | Tee-Object native/source-proof-evidence/closure.log
           if($LASTEXITCODE -ne 0){throw 'Actual corresponding-source closure failed.'}
@@ -551,9 +555,10 @@ jobs:
           cmake --build native/build-update-e2e --config Release --parallel --target gsw_update_application_fixture_a gsw_update_application_fixture_b gsw_update_fixture_launcher
           if($LASTEXITCODE -ne 0){throw 'E2E native windows/launcher build failed.'}
           cmake -S native/recovery -B native/build-recovery-e2e -G 'Visual Studio 17 2022' -A x64 `
-            -DGSW_UPDATER_FIXTURE_BUILD=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-update-e2e/Scripts/python.exe"
+            -DGSW_UPDATER_FIXTURE_BUILD=ON -DGSW_RECOVERY_UI_TESTS=ON `
+            "-DPython3_EXECUTABLE=$PWD/native/.qa-update-e2e/Scripts/python.exe"
           if($LASTEXITCODE -ne 0){throw 'Independent recovery fixture configure failed.'}
-          cmake --build native/build-recovery-e2e --config Release --parallel --target gsw_native_recovery
+          cmake --build native/build-recovery-e2e --config Release --parallel --target gsw_native_recovery gsw_native_recovery_ui_tests
           if($LASTEXITCODE -ne 0){throw 'Independent recovery fixture build failed.'}
       - name: Issue private isolated A B and bad C
         shell: pwsh
@@ -617,6 +622,16 @@ jobs:
             --preparation native/.update-e2e/preparation.json --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe `
             --evidence "$PWD/native/recovery-entry-evidence" 2>&1 | Tee-Object native/update-e2e-evidence/recovery-entry.log
           if($LASTEXITCODE -ne 0){throw 'Independent native recovery entry contract failed.'}
+      - name: Real trusted recovery chooser rejects tampering and revalidates explicit rollback
+        if: ${{ !cancelled() && steps.e2e_helper.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-update-e2e/Scripts/python.exe" -I -B scripts/test_native_recovery_chooser.py --remote-fixture-only `
+            --preparation native/.update-e2e/preparation.json --trust-cli D:/gu/e/release/gsw-trust-fixture-cli.exe `
+            --qt-test "$PWD/native/build-recovery-e2e/Release/gsw_native_recovery_ui_tests.exe" `
+            --windeployqt (Get-Command windeployqt).Source --evidence "$PWD/native/recovery-chooser-evidence" `
+            2>&1 | Tee-Object native/update-e2e-evidence/recovery-chooser.log
+          if($LASTEXITCODE -ne 0){throw 'Independent trusted recovery chooser contract failed.'}
       - name: Record isolated identity and stop only the test server
         if: always()
         shell: pwsh
@@ -628,7 +643,11 @@ jobs:
             runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/update-e2e-evidence/source.json
           if(Test-Path native/.update-e2e/preparation.json){
             $prepared=Get-Content native/.update-e2e/preparation.json -Raw | ConvertFrom-Json
-            if($prepared.serverPid){Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue}
+            $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($prepared.serverPid)" -ErrorAction SilentlyContinue
+            if($process.CommandLine -and $process.CommandLine.Contains('native_update_network_fixture.py') -and
+                $process.CommandLine.Contains($prepared.root)){
+              Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue
+            }
           }
       - uses: actions/upload-artifact@v7
         if: always()
@@ -645,8 +664,125 @@ jobs:
           path: |
             native/update-live-evidence/
             native/recovery-entry-evidence/
+            native/recovery-chooser-evidence/
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 14
+  isolated-signed-automatic-ui:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: D:/gu/c
+      RUSTUP_HOME: D:/gu/r
+      CARGO_TARGET_DIR: D:/gu/au
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        id: python
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          dir: ${{ github.workspace }}/native/.qt-automatic
+      - uses: actions/cache@v5
+        with:
+          path: |
+            D:/gu/c
+            D:/gu/r
+          key: updater-rust-1.99.1-${{ runner.os }}-${{ hashFiles('native/updater-trust/Cargo.lock') }}
+      - name: Build private automatic UI and stable-entry fixture programs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/.tmp-automatic,native/update-automatic-evidence -Force | Out-Null
+          "TEMP=$PWD/native/.tmp-automatic" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TMP=$PWD/native/.tmp-automatic" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & '${{ steps.python.outputs.python-path }}' -m venv "$PWD/native/.qa-automatic"
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow isolated Python unavailable.'}
+          & "$PWD/native/.qa-automatic/Scripts/python.exe" -m pip install -r packaging/updates/fixture-requirements.txt
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow fixture dependencies unavailable.'}
+          cmake -S native/updater-ui -B native/build-automatic-ui -G 'Visual Studio 17 2022' -A x64 `
+            -DGSW_UPDATER_SIGNED_AUTOMATIC_FIXTURE=ON "-DPython3_EXECUTABLE=$PWD/native/.qa-automatic/Scripts/python.exe"
+          if($LASTEXITCODE -ne 0){throw 'Signed automatic UI configure failed.'}
+          cmake --build native/build-automatic-ui --config Release --parallel --target gsw_update_ui_signed_fixture_a
+          if($LASTEXITCODE -ne 0){throw 'Signed automatic UI build failed.'}
+          cmake -S native/updater -B native/build-automatic-entry -G 'Visual Studio 17 2022' -A x64 `
+            -DBUILD_TESTING=OFF -DGSW_UPDATER_FIXTURE_BUILD=ON
+          if($LASTEXITCODE -ne 0){throw 'Automatic stable-entry configure failed.'}
+          cmake --build native/build-automatic-entry --config Release --parallel --target gsw_update_application_fixture_b gsw_update_fixture_launcher
+          if($LASTEXITCODE -ne 0){throw 'Automatic stable-entry build failed.'}
+      - name: Issue fresh signed automatic-flow A and original B before helper compilation
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-automatic/Scripts/python.exe" -I -B scripts/test_native_update_automatic.py prepare --remote-fixture-only `
+            --root "$PWD/native/.update-automatic" `
+            --fixture-a "$PWD/native/build-automatic-ui/signed-automatic-A/Release/Gaussian Scene Workbench.exe" `
+            --fixture-b "$PWD/native/build-automatic-entry/fixture-B/Release/Gaussian Scene Workbench.exe" `
+            --launcher "$PWD/native/build-automatic-entry/Release/Gaussian Scene Workbench Launcher.exe" `
+            --windeployqt (Get-Command windeployqt).Source --source-commit (git rev-parse HEAD).Trim() `
+            --source-tree (git rev-parse 'HEAD^{tree}').Trim() 2>&1 | Tee-Object native/update-automatic-evidence/prepare.log
+          if($LASTEXITCODE -ne 0){throw 'Signed automatic-flow preparation failed.'}
+          $prepared=Get-Content native/.update-automatic/preparation.json -Raw | ConvertFrom-Json
+          "GSW_UPDATER_FIXTURE_PROFILE_PATH=$($prepared.profile)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Independently rebuild the automatic A corresponding source without launching it
+        shell: pwsh
+        run: |
+          cmake -S native/.update-automatic/package-A/source/native/updater-ui -B native/build-automatic-source-A `
+            -G 'Visual Studio 17 2022' -A x64 -DGSW_UPDATER_SIGNED_AUTOMATIC_FIXTURE=ON `
+            "-DPython3_EXECUTABLE=$PWD/native/.qa-automatic/Scripts/python.exe"
+          if($LASTEXITCODE -ne 0){throw 'Automatic A corresponding-source configure failed.'}
+          cmake --build native/build-automatic-source-A --config Release --parallel --target gsw_update_ui_signed_fixture_a `
+            2>&1 | Tee-Object native/update-automatic-evidence/source-A.log
+          if($LASTEXITCODE -ne 0){throw 'Automatic A corresponding source does not rebuild.'}
+      - name: Link a distinct actual Helper with this automatic-flow test root
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow pinned Rust unavailable.'}
+          rustup run 1.99.1 cargo build --manifest-path native/updater-trust/Cargo.toml --locked --release `
+            --no-default-features --features fixture-cli --target-dir D:/gu/au
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow fixture trust build failed.'}
+          cmake -S native/updater -B native/build-automatic-entry -DGSW_TRUST_LIBRARY=D:/gu/au/release/gsw_updater_trust.lib
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow actual helper configure failed.'}
+          cmake --build native/build-automatic-entry --config Release --parallel --target gsw_native_update_helper
+          if($LASTEXITCODE -ne 0){throw 'Automatic-flow actual helper build failed.'}
+      - name: Actual automatic Controller signed preparation activation and next stable launch
+        shell: pwsh
+        run: |
+          & "$PWD/native/.qa-automatic/Scripts/python.exe" -I -B scripts/test_native_update_automatic.py run --remote-fixture-only `
+            --preparation native/.update-automatic/preparation.json `
+            --helper "$PWD/native/build-automatic-entry/Release/GSW Update Fixture Helper.exe" `
+            --trust-cli D:/gu/au/release/gsw-trust-fixture-cli.exe --windeployqt (Get-Command windeployqt).Source `
+            --evidence "$PWD/native/update-automatic-evidence/contracts" 2>&1 | Tee-Object native/update-automatic-evidence/run.log
+          if($LASTEXITCODE -ne 0){throw 'Real signed automatic-update UI contract failed.'}
+      - name: Stop only this owned automatic-flow issuer and record source scope
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/update-automatic-evidence -Force | Out-Null
+          [ordered]@{schema='gsw.updater_isolated_evidence/1';scope='production-ui-signed-fixture-only';
+            production=false;formalGswAcceptance=false;sourceCommit=(git rev-parse HEAD).Trim();
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();runId=$env:GITHUB_RUN_ID;
+            runAttempt=$env:GITHUB_RUN_ATTEMPT} | ConvertTo-Json | Set-Content native/update-automatic-evidence/source.json
+          if(Test-Path native/.update-automatic/preparation.json){
+            $prepared=Get-Content native/.update-automatic/preparation.json -Raw | ConvertFrom-Json
+            $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($prepared.serverPid)" -ErrorAction SilentlyContinue
+            if($process.CommandLine -and $process.CommandLine.Contains('native_update_network_fixture.py') -and
+                $process.CommandLine.Contains($prepared.root)){
+              Stop-Process -Id $prepared.serverPid -ErrorAction SilentlyContinue
+            }
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-auto-update-signed-automatic-evidence
+          path: native/update-automatic-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
   isolated-first-bootstrap:
     runs-on: windows-2022

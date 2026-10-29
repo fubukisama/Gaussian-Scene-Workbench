@@ -301,6 +301,13 @@ class LiveUpdate(unittest.TestCase):
             self.assertEqual(a_process.snapshot()["exitCode"], 0)
             final_a = self.wait_json(a_marker, lambda row: row.get("phase") == "normal_exit")
             self.assertEqual(final_a["exitCode"], 0)
+            # B really acknowledged readiness and was the later launch. An
+            # older A observer completing its unchanged15s window must not
+            # overwrite B's newer availability evidence with a stale result.
+            latest_health = helper.helper_request("live-latest-health-after-A", "--startup-status")[-1]
+            self.assertEqual(latest_health.get("code"), "HEALTHY")
+            self.assertEqual(latest_health.get("attempt", {}).get("buildId"), "fixture-b")
+            self.assertEqual(latest_health.get("attempt", {}).get("pid"), b_record["pid"])
             stop_path.write_bytes(b"owned-worker-release\n")
             self.assertEqual(worker_process.kernel.WaitForSingleObject(worker_process.handle, 5000), 0)
             self.assertEqual(worker_process.snapshot()["exitCode"], 0)
@@ -321,6 +328,7 @@ class LiveUpdate(unittest.TestCase):
                 "workerTicksDuringInstall": len(during), "workerFinalStep": final_queue["step"],
                 "bootstrapUnchanged": True, "oldSlotUnchanged": True, "userDataUnchanged": True,
                 "pausedCpuSentinelUnchanged": True, "optimizerResume3DGS": "NOT_RUN",
+                "latestHealthAfterOlderObserver": latest_health,
                 "optimizerResume2DGS": "NOT_RUN", "sourceCommit": preparation["sourceCommit"],
                 "sourceTree": preparation["sourceTree"], "steps": helper.steps})
         finally:

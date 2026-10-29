@@ -14,17 +14,20 @@ namespace {
 struct LabDiagnostic {
   const char *stage = "start";
   bool childCreated = false, childResumed = false, childTokenValidated = false, childExited = false;
-  DWORD childExitCode = 0;
+  DWORD childExitCode = 0, childProcessId = 0;
   size_t outputBytes = 0;
   std::string childCode;
   Json access = Json::object();
+  Json objects = Json::object();
   Json record(DWORD lastOsError) const {
     Json value{{"probeTag", "BOOTSTRAP-LAB-DIAG-1"}, {"stage", stage}, {"lastOsError", lastOsError},
         {"childCreated", childCreated}, {"childResumed", childResumed}, {"childTokenValidated", childTokenValidated},
         {"childExited", childExited}, {"capturedOutputBytes", outputBytes}};
     if (childExited) value["childExitCode"] = childExitCode;
+    if (childCreated) value["childProcessId"] = childProcessId;
     if (!childCode.empty()) value["childResponseCode"] = childCode;
     if (!access.empty()) value["restrictedAccess"] = access;
+    if (!objects.empty()) value["restrictedObjects"] = objects;
     return value;
   }
 } diagnostic;
@@ -193,6 +196,85 @@ Json restrictedAccess(HANDLE token, const std::wstring &image, const Desktop &de
   need(restored, "BOOTSTRAP_LAB_REVERT_FAILED");
   return result;
 }
+// Classify only. Never serialize a SID, security descriptor, account name or
+// ACL text. Reading these known, suspended child objects cannot grant access.
+Json restrictedObjects(HANDLE token, HANDLE process, HANDLE thread, DWORD processId, DWORD threadId) {
+  const auto users = tokenData(token, TokenUser);
+  const auto groupsData = tokenData(token, TokenGroups);
+  const auto restrictedData = tokenData(token, TokenRestrictedSids);
+  const auto defaults = tokenData(token, TokenDefaultDacl);
+  const auto user = reinterpret_cast<const TOKEN_USER *>(users.data())->User.Sid;
+  const auto *groups = reinterpret_cast<const TOKEN_GROUPS *>(groupsData.data());
+  const auto *restricted = reinterpret_cast<const TOKEN_GROUPS *>(restrictedData.data());
+  const auto matches = [](PSID sid, const TOKEN_GROUPS *list, DWORD required, DWORD excluded) {
+    for (DWORD i = 0; i < list->GroupCount; ++i)
+      if ((list->Groups[i].Attributes & required) == required && !(list->Groups[i].Attributes & excluded) &&
+          EqualSid(sid, list->Groups[i].Sid)) return true;
+    return false;
+  };
+  const auto classify = [&](PSID sid) {
+    return Json{{"user", EqualSid(sid, user) != FALSE}, {"administrative", administrative(sid)},
+        {"enabledGroup", matches(sid, groups, SE_GROUP_ENABLED, SE_GROUP_USE_FOR_DENY_ONLY)},
+        {"denyOnlyGroup", matches(sid, groups, SE_GROUP_USE_FOR_DENY_ONLY, 0)},
+        {"logonGroup", matches(sid, groups, SE_GROUP_LOGON_ID, 0)},
+        {"restricting", matches(sid, restricted, 0, 0)},
+        {"restrictedCode", IsWellKnownSid(sid, WinRestrictedCodeSid) != FALSE},
+        {"system", IsWellKnownSid(sid, WinLocalSystemSid) != FALSE},
+        {"everyone", IsWellKnownSid(sid, WinWorldSid) != FALSE}};
+  };
+  const auto acl = [&](PACL value) {
+    Json summary{{"nullDacl", value == nullptr}, {"aces", Json::array()}};
+    if (!value) return summary;
+    if (!IsValidAcl(value)) return Json{{"valid", false}};
+    summary["valid"] = true;
+    summary["aceCount"] = value->AceCount;
+    for (DWORD i = 0; i < value->AceCount; ++i) {
+      void *raw = nullptr;
+      if (!GetAce(value, i, &raw)) { summary["queryError"] = GetLastError(); break; }
+      const auto *header = static_cast<const ACE_HEADER *>(raw);
+      Json entry{{"type", header->AceType}, {"flags", header->AceFlags}};
+      if (header->AceType == ACCESS_ALLOWED_ACE_TYPE || header->AceType == ACCESS_DENIED_ACE_TYPE) {
+        const auto *ordinary = static_cast<const ACCESS_ALLOWED_ACE *>(raw);
+        entry["rights"] = ordinary->Mask;
+        entry["principalClass"] = classify(const_cast<DWORD *>(&ordinary->SidStart));
+      }
+      summary["aces"].push_back(std::move(entry));
+    }
+    return summary;
+  };
+  Json result{{"scope", "read-only-known-suspended-child-objects"}, {"restrictingSidCount", restricted->GroupCount},
+      {"restrictingContainsUser", matches(user, restricted, 0, 0)},
+      {"tokenDefaultDacl", acl(reinterpret_cast<const TOKEN_DEFAULT_DACL *>(defaults.data())->DefaultDacl)}};
+  Json restrictions = Json::array();
+  for (DWORD i = 0; i < restricted->GroupCount; ++i) restrictions.push_back(classify(restricted->Groups[i].Sid));
+  result["restrictingPrincipalClasses"] = std::move(restrictions);
+  const auto object = [&](const char *name, HANDLE value) {
+    PSID owner = nullptr;
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const auto status = GetSecurityInfo(value, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        &owner, nullptr, &dacl, nullptr, &descriptor);
+    Json item{{"queryOsError", status}};
+    if (status == ERROR_SUCCESS) { item["ownerClass"] = classify(owner); item["dacl"] = acl(dacl); }
+    if (descriptor) LocalFree(descriptor);
+    result[name] = std::move(item);
+  };
+  object("process", process); object("thread", thread);
+  if (!ImpersonateLoggedOnUser(token)) { result["accessProbeOsError"] = GetLastError(); return result; }
+  struct Revert { bool active = true; ~Revert() { if (active) RevertToSelf(); } } revert;
+  const auto attempt = [&](const char *name, DWORD rights, bool processObject) {
+    SetLastError(ERROR_SUCCESS);
+    Handle opened(processObject ? OpenProcess(rights, FALSE, processId) : OpenThread(rights, FALSE, threadId));
+    result[name] = {{"rights", rights}, {"allowed", bool(opened)}, {"osError", opened ? ERROR_SUCCESS : GetLastError()}};
+  };
+  attempt("processQuery", PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, true);
+  attempt("processRead", PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | READ_CONTROL, true);
+  attempt("threadQuery", THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | READ_CONTROL, false);
+  const bool restored = RevertToSelf() != FALSE;
+  revert.active = !restored;
+  need(restored, "BOOTSTRAP_LAB_REVERT_FAILED");
+  return result;
+}
 std::vector<wchar_t> clientEnvironment(const std::wstring &bootstrap, const std::wstring &base) {
   std::array<wchar_t, 32768> windows{};
   const auto count = GetWindowsDirectoryW(windows.data(), DWORD(windows.size()));
@@ -268,6 +350,7 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
       CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
       environment.data(), base.c_str(), &start.StartupInfo, &information) != FALSE, "BOOTSTRAP_CLIENT_CREATE_FAILED");
   diagnostic.childCreated = true;
+  diagnostic.childProcessId = information.dwProcessId;
   OwnedProcess child{Handle(information.hProcess), Handle(information.hThread)};
   stage("attach_owned_job");
   Handle job(CreateJobObjectW(nullptr, nullptr));
@@ -278,11 +361,16 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
       AssignProcessToJobObject(job.value, child.process.value), "BOOTSTRAP_LAB_JOB_FAILED");
   HANDLE actualToken = nullptr;
   stage("verify_suspended_client_token");
-  need(OpenProcessToken(child.process.value, TOKEN_QUERY, &actualToken) != FALSE, "BOOTSTRAP_CLIENT_TOKEN_QUERY_FAILED");
+  // TOKEN_DUPLICATE permits read-only impersonation probes of this exact
+  // suspended child's token; it does not alter or replace the child token.
+  need(OpenProcessToken(child.process.value, TOKEN_QUERY | TOKEN_DUPLICATE, &actualToken) != FALSE, "BOOTSTRAP_CLIENT_TOKEN_QUERY_FAILED");
   Handle actual(actualToken);
   const auto facts = tokenFacts(actual.value);
   need(ordinaryClient(facts), "BOOTSTRAP_CLIENT_TOKEN_NOT_ORDINARY");
   diagnostic.childTokenValidated = true;
+  stage("probe_suspended_child_objects");
+  diagnostic.objects = restrictedObjects(actual.value, child.process.value, child.thread.value,
+      information.dwProcessId, information.dwThreadId);
   childOutput.close(); childInput.close();
   stage("resume_client");
   need(ResumeThread(child.thread.value) != DWORD(-1), "BOOTSTRAP_CLIENT_RESUME_FAILED");
@@ -324,7 +412,8 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
     stage("loader_control_observed");
     return {{"scope", "diagnostic-control-not-installation-acceptance"}, {"enteredMain", entered},
         {"childExitCode", exit}, {"capturedOutputBytes", captured.size()}, {"terminalToken", facts},
-        {"privateDesktopRequested", requestPrivateDesktop}, {"restrictedAccess", diagnostic.access}};
+        {"childProcessId", information.dwProcessId}, {"privateDesktopRequested", requestPrivateDesktop},
+        {"restrictedAccess", diagnostic.access}, {"restrictedObjects", diagnostic.objects}};
   }
   stage("parse_child_response");
   const auto response = Json::parse(captured);

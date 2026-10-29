@@ -56,6 +56,26 @@ foreach(target gsw_update_ui_production gsw_update_ui_fixture)
   target_link_libraries(${target} PUBLIC gsw_update_ui_shared Qt6::Widgets)
 endforeach()
 
+option(GSW_UPDATER_SIGNED_AUTOMATIC_FIXTURE
+  "Build the private real-helper signed automatic-update integration fixture" OFF)
+if(BUILD_TESTING AND GSW_UPDATER_SIGNED_AUTOMATIC_FIXTURE)
+  # Links the production UI, NOT the environment-locator fixture variant.
+  # Never install/package this target as the formal GSW application.
+  qt_add_executable(gsw_update_ui_signed_fixture_a WIN32
+    "${native_root}/tests/NativeUpdateAutomaticFlowFixture.cpp")
+  target_link_libraries(gsw_update_ui_signed_fixture_a PRIVATE
+    gsw_update_ui_production gsw_update_ui_language_resources Qt6::Widgets Qt6::Test)
+  target_compile_definitions(gsw_update_ui_signed_fixture_a PRIVATE
+    GSW_UPDATE_SIGNED_AUTOMATIC_FIXTURE=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+  set_target_properties(gsw_update_ui_signed_fixture_a PROPERTIES
+    OUTPUT_NAME "Gaussian Scene Workbench"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/signed-automatic-A")
+  if(MSVC)
+    target_compile_options(gsw_update_ui_signed_fixture_a PRIVATE
+      /W4 /permissive- /utf-8 /Zc:__cplusplus)
+  endif()
+endif()
+
 qt_add_executable(gsw_update_ui_helper_fixture "${native_root}/tests/NativeUpdateUiHelperFixture.cpp")
 target_link_libraries(gsw_update_ui_helper_fixture PRIVATE Qt6::Core)
 set_target_properties(gsw_update_ui_helper_fixture PROPERTIES OUTPUT_NAME "GSW Update UI Helper Fixture")
