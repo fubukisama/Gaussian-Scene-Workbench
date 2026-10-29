@@ -1,0 +1,186 @@
+name: Native Initialization Contract
+
+# A narrow remote loop for the existing real dialog / CPU-worker contract.
+# This is not a replacement for Forms, full Native Windows, GPU or delivery gates.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  initialization-contract:
+    if: github.ref == 'refs/heads/main' && github.repository_id == '1286130219'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PYTHONDONTWRITEBYTECODE: '1'
+      QT_FORCE_STDERR_LOGGING: '1'
+      QT_LOGGING_TO_CONSOLE: '1'
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v7
+      - name: Declare fresh owned storage and source identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $system=[IO.Path]::GetPathRoot($env:SystemRoot)
+          $temporary=[IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $temporaryDrive=[IO.Path]::GetPathRoot($temporary)
+          $drives=@([IO.DriveInfo]::GetDrives() | Where-Object {
+            $_.IsReady -and $_.DriveType -eq [IO.DriveType]::Fixed -and $_.RootDirectory.FullName -ine $system
+          } | Sort-Object @{Expression={if($_.Name -ieq 'D:\'){0}else{1}}},Name)
+          $candidates=@($drives | ForEach-Object {
+            if($_.RootDirectory.FullName -ieq $temporaryDrive){$temporary}
+            else{Join-Path $_.RootDirectory.FullName 'CodexCiTemp'}
+          })
+          # A single usable system drive is allowed automatically. Never warn or
+          # require a particular drive letter merely because no other drive works.
+          $candidates+=@($temporary)
+          $root=$null
+          foreach($base in @($candidates | Select-Object -Unique)){
+            $candidate=Join-Path $base ('gsw-init-contract-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)
+            if(Test-Path -LiteralPath $candidate){throw 'Preserve the existing contract directory; do not overwrite evidence.'}
+            try{New-Item -ItemType Directory -Path $candidate -ErrorAction Stop | Out-Null;$root=$candidate;break}
+            catch [UnauthorizedAccessException]{continue}
+            catch [IO.IOException]{continue}
+          }
+          if(-not $root){throw 'No writable owned contract directory is available.'}
+          $base=Split-Path $root -Parent
+          $positive=Join-Path $base ('gsw-ip-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)
+          if(Test-Path -LiteralPath $positive){throw 'The declared positive publication parent must be fresh.'}
+          $evidence=Join-Path $root 'evidence'
+          $pipCache=Join-Path $base 'gsw-init-contract-pip-cache'
+          $qtParent=Join-Path $base 'gsw-init-contract-qt'
+          New-Item -ItemType Directory -Path $evidence,"$root/tmp","$root/vcpkg-cache",$positive,$pipCache -Force | Out-Null
+          "GSW_INIT_CONTRACT_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GSW_INIT_CONTRACT_EVIDENCE=$evidence" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GSW_INIT_PUBLICATION_PARENT=$positive" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GSW_INIT_QT_PARENT=$qtParent" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TEMP=$root/tmp" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$root/tmp" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PIP_CACHE_DIR=$pipCache" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_BINARY_CACHE=$root/vcpkg-cache" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          $head=(git rev-parse HEAD).Trim()
+          if($head -cne $env:GITHUB_SHA){throw 'Unexpected checked-out source identity.'}
+          [ordered]@{schema='gsw.initialization_contract_run/1';sourceCommit=$head;
+            sourceTree=(git rev-parse 'HEAD^{tree}').Trim();repositoryId=$env:GITHUB_REPOSITORY_ID;
+            runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT;
+            test='native_initialization_dialog_ui';testTimeoutSeconds=180;status='NOT_RUN';
+            originalCallerRoot='native/build-initialization-contract/initialization-test-data';
+            declaredPositivePublicationParent=$positive;originalCallerRootRelocated=$false;
+            gswMainApplicationBuilt=$false;gswMainApplicationLaunched=$false;
+            gpuOrTrainingStarted=$false;fullAcceptance=$false;recordedUtc=[DateTime]::UtcNow.ToString('o')} |
+            ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$evidence/source-run.json" -Encoding utf8
+      - name: Locate Python 3.12 bootstrap
+        id: bootstrap
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: scripts/requirements-native-checks.txt
+      - name: Create isolated QA environment on the owned drive
+        id: qa
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $environment=Join-Path $env:GSW_INIT_CONTRACT_ROOT 'qa-python'
+          & '${{ steps.bootstrap.outputs.python-path }}' -m venv $environment
+          if($LASTEXITCODE -ne 0){throw 'Owned-drive QA Python environment creation failed.'}
+          $python=Join-Path $environment 'Scripts/python.exe'
+          & $python -m pip install -r scripts/requirements-native-checks.txt
+          if($LASTEXITCODE -ne 0){throw 'Canonical native QA dependencies failed.'}
+          "python-path=$python" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "$(Join-Path $environment 'Scripts')" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install Qt SDK without replacing the declared Python
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          cache-key-prefix: initialization-contract-qt
+          dir: ${{ env.GSW_INIT_QT_PARENT }}
+          # Keep aqt/pip in the already-declared drive-local Python environment.
+          setup-python: false
+      - name: Configure original native project and build only the dialog test
+        id: build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $deps=Join-Path $env:GSW_INIT_CONTRACT_ROOT 'deps'
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows-static-md zstd:x64-windows-static-md `
+            "--x-install-root=$deps/installed" "--x-buildtrees-root=$deps/buildtrees" `
+            "--x-packages-root=$deps/packages" "--downloads-root=$deps/downloads"
+          if($LASTEXITCODE -ne 0){throw 'Required native configure codec dependencies failed.'}
+          # Deliberately keep the caller test root in the checkout/build context.
+          # The positive publication parent is separate; no failing path is shortened.
+          $build=Join-Path $PWD 'native/build-initialization-contract'
+          if(Test-Path -LiteralPath $build){throw 'A fresh native contract build directory is required.'}
+          $date=(Get-Content native/build_manifest.json -Raw|ConvertFrom-Json).releaseDate
+          cmake -S native -B $build -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON `
+            '-DCMAKE_CXX_FLAGS=/MP2' -DGSW_UI_FORM_CAPTURE_TESTS=OFF "-DGSW_RELEASE_DATE=$date" `
+            '-DPython3_EXECUTABLE=${{ steps.qa.outputs.python-path }}' `
+            "-DGSW_INITIALIZATION_PUBLICATION_TEST_ROOT=$env:GSW_INIT_PUBLICATION_PARENT" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=$deps/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md 2>&1 |
+            Tee-Object -FilePath "$env:GSW_INIT_CONTRACT_EVIDENCE/configure.log"
+          if($LASTEXITCODE -ne 0){throw 'Actual native project configure failed.'}
+          cmake --build $build --config Release --parallel 2 --target gsw_initialization_dialog_ui_tests 2>&1 |
+            Tee-Object -FilePath "$env:GSW_INIT_CONTRACT_EVIDENCE/build.log"
+          if($LASTEXITCODE -ne 0){throw 'Actual initialization-dialog target build failed.'}
+          $executable=Join-Path $build 'Release/gsw_initialization_dialog_ui_tests.exe'
+          if(-not (Test-Path -LiteralPath $executable -PathType Leaf)){throw 'The actual test executable is missing.'}
+          if(Test-Path -LiteralPath "$build/Release/Gaussian Scene Workbench.exe"){
+            throw 'This narrow target unexpectedly built the desktop application.'
+          }
+          ctest --test-dir $build -C Release --show-only=json-v1 -R '^native_initialization_dialog_ui$' |
+            Out-File -LiteralPath "$env:GSW_INIT_CONTRACT_EVIDENCE/test-definition.json" -Encoding utf8
+          if($LASTEXITCODE -ne 0){throw 'Original CTest definition could not be retained.'}
+          $definition=Get-Content -LiteralPath "$env:GSW_INIT_CONTRACT_EVIDENCE/test-definition.json" -Raw|ConvertFrom-Json
+          if($definition.tests.Count -ne 1 -or $definition.tests[0].name -cne 'native_initialization_dialog_ui'){
+            throw 'The narrow test selection must resolve to the original single CTest.'
+          }
+          $timeout=@($definition.tests[0].properties|Where-Object name -ceq 'TIMEOUT')
+          if($timeout.Count -ne 1 -or $timeout[0].value -ne 180){throw 'The original 180-second CTest limit changed.'}
+          [ordered]@{sourceCommit=$env:GITHUB_SHA;target='gsw_initialization_dialog_ui_tests';
+            executableSha256=(Get-FileHash -LiteralPath $executable).Hash.ToLowerInvariant();
+            testSourceSha256=(Get-FileHash -LiteralPath 'native/tests/InitializationDialogUiTests.cpp').Hash.ToLowerInvariant();
+            cmakeSourceSha256=(Get-FileHash -LiteralPath 'native/CMakeLists.txt').Hash.ToLowerInvariant();
+            gswMainApplicationBuilt=$false;fullAcceptance=$false} | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath "$env:GSW_INIT_CONTRACT_EVIDENCE/build.json" -Encoding utf8
+      - name: Execute the actual dialog and CPU-worker contract remotely
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $PSNativeCommandUseErrorActionPreference=$false
+          if($env:GITHUB_ACTIONS -cne 'true'){throw 'Automated execution is remote-only.'}
+          $build=Join-Path $PWD 'native/build-initialization-contract'
+          # The original CTest supplies QT_QPA_PLATFORM=offscreen; no display,
+          # Mesa, OpenGL renderer, desktop GSW, installer or trainer is started.
+          ctest --test-dir $build -C Release --parallel 1 --no-tests=error --output-on-failure --verbose `
+            --output-junit "$env:GSW_INIT_CONTRACT_EVIDENCE/ctest.xml" `
+            --output-log "$env:GSW_INIT_CONTRACT_EVIDENCE/ctest.log" -R '^native_initialization_dialog_ui$'
+          $code=$LASTEXITCODE
+          [ordered]@{schema='gsw.initialization_contract_result/1';sourceCommit=$env:GITHUB_SHA;
+            test='native_initialization_dialog_ui';ctestExit=$code;status=$(if($code -eq 0){'PASS'}else{'FAIL'});
+            testExecutableExecuted=$true;gswMainApplicationLaunched=$false;gpuOrTrainingStarted=$false;
+            fullAcceptance=$false;recordedUtc=[DateTime]::UtcNow.ToString('o')} |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$env:GSW_INIT_CONTRACT_EVIDENCE/result.json" -Encoding utf8
+          exit $code
+      - name: Retain original evidence even on failure
+        if: ${{ always() && env.GSW_INIT_CONTRACT_EVIDENCE != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-initialization-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GSW_INIT_CONTRACT_EVIDENCE }}/
+            native/build-initialization-contract/Testing/Temporary/LastTest.log
+            native/build-initialization-contract/Testing/Temporary/LastTestsFailed.log
+            native/build-initialization-contract/Testing/Temporary/CTestCostData.txt
+          if-no-files-found: error
+          retention-days: 14

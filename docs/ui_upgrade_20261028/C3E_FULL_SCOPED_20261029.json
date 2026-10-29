@@ -1,0 +1,108 @@
+{
+  "schema": "gsw.ui_c3e_full_scoped_evidence/1",
+  "auditedUtc": "2026-10-29T06:49:23Z",
+  "status": "QT_JOB_SUCCESS_UPSTREAM_SUCCESS_CODEQL_PENDING_AT_OBSERVATION",
+  "sourceCommit": "c3e667a249e0de1b4384aa3d97d29172e08a474b",
+  "sourceTree": "59d195a88b50ee9e2685c81998f5a74f302dd0a6",
+  "repositoryId": 1286130219,
+  "currentCanonicalRepository": "fubukisama/GaussianSplattingWorkbench",
+  "runId": "40823880544",
+  "runUrl": "https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40823880544",
+  "jobsAtObservation": [
+    {"id": "123282342457", "name": "Qt 6 native preview", "status": "completed", "conclusion": "success"},
+    {"id": "123282342524", "name": "Upstream viewport acceptance", "status": "completed", "conclusion": "success"},
+    {"id": "123282342250", "name": "Native C++ CodeQL", "status": "in_progress", "conclusion": null}
+  ],
+  "localEvidenceRoot": "D:/Codex/validation/gsw-ui-upgrade-20261028/full-c3e-run40823880544-evidence",
+  "downloadedArtifacts": [
+    {"id": "12878186229", "name": "native-full-test-evidence", "bytes": 3331239, "zipSha256": "6d4530a9e9db17398c6fe9253f4bfc437c5857baaa5ddc89a5c1944365e1a070", "metadataSourceAndRunMatched": true, "downloadCount": 1, "shaVerifiedBeforeFreshExtraction": true},
+    {"id": "12877949285", "name": "native-artifact-roundtrip-receipts", "bytes": 1021, "zipSha256": "e98f0748dd3719d6d13d8db1889a74744a7ff645e9eb9246bc348fde840893c4", "metadataSourceAndRunMatched": true, "downloadCount": 1, "shaVerifiedBeforeFreshExtraction": true}
+  ],
+  "graphicsBootstrap": {
+    "passed": 4,
+    "failed": 0,
+    "totalSeconds": 247.21,
+    "tests": [
+      {"name": "native_infinite_reference_grid", "seconds": 6.00},
+      {"name": "native_textured_paged_mesh_scene", "seconds": 5.85},
+      {"name": "native_light_gaussian_interaction", "seconds": 235.10},
+      {"name": "system_resource_probe", "seconds": 0.18}
+    ],
+    "originalSelectionOnly": true,
+    "performanceBenchmarkClaim": false
+  },
+  "fullCTest": {"passed": 175, "failed": 0, "totalSeconds": 1863.28},
+  "installationFixtures": {
+    "nativeInstallationQtTestRowsPassed": 10,
+    "rowsIncludeInitAndCleanup": true,
+    "failed": 0,
+    "skipped": 0,
+    "psAdapterActuallyInvoked": true,
+    "psAdapterTerminalPassObserved": true,
+    "perContractPsJsonRetainedInTheseArtifacts": false,
+    "olderFocusedThirteenContractJsonRelabelled": false,
+    "userInstallationAcceptanceClaim": false
+  },
+  "productRoundtrip": {
+    "status": "PASS",
+    "checkerSourceCommit": "c3e667a249e0de1b4384aa3d97d29172e08a474b",
+    "baselineCompared": true,
+    "fileCount": 3044,
+    "backendFilesVerified": 1351,
+    "sourceFilesVerified": 1583,
+    "hiddenFileCount": 28,
+    "executableSha256": "91e21f70a869e3a6fa78db27ffb5dfb97eeaef5a5be7548c741408a231151b8e",
+    "applicationExecutedByFileChecker": false,
+    "authenticityClaim": false,
+    "actualProductBinaryDownloadedOrRehashedLocally": false
+  },
+  "gridTrace": {
+    "actuallyPresent": true,
+    "requestSourceTreeAndRunMatched": true,
+    "requestExecutableMatchedProductRoundtrip": true,
+    "rows": 37,
+    "uniquePhases": 37,
+    "sequenceContiguousAndElapsedMonotonic": true,
+    "firstPhase": "main.entry",
+    "lastPhase": "event-loop.end",
+    "finalElapsedUs": 5889167,
+    "timeoutPhaseObserved": false,
+    "ctestTimeoutSeconds": 15,
+    "internalDeadlineSeconds": 10,
+    "internalDeadlineStartedAtElapsedUs": 4976918,
+    "mainWindowConstructorIntervalUs": 4148165,
+    "showIntervalUs": 741662,
+    "originalInvocationOnly": true,
+    "newCapturesAdded": false,
+    "retriesAdded": false,
+    "oldNameGuardEnabledForThisExactRun": true,
+    "laterImmutableIdGuardExercisedClaim": false,
+    "historicalTimeoutRootCauseProven": false,
+    "performanceNoRegressionClaim": false,
+    "oldFailedBinaryReplayed": false
+  },
+  "evidenceSha256": {
+    "trace-request.json": "c79f834ef379db9d614004bcb0abedf45e41a97cfbd7c1f6a340383f8a3a429d",
+    "grid-phase.jsonl": "e1cff4ad7ee6e38a0f4d604fc577715ae106d501f49d262fb42dd926aeb0620a",
+    "bootstrap.log": "e866db43968b4287287902d5e65468c86fd1270145659ec7b5047f0f68d546f9",
+    "full-tests.log": "5bcc32622a930a8ccf3290fc13a9e98e05318e99e0b8ee09ad47f0d6c7e6408e",
+    "native-managed-installation.log": "010146013f6f8c38f396048836a71647c5e44b769ca928aba730548a775a4d5e",
+    "gsw-native-artifact-roundtrip.json": "057dc6254e5bbc942a3f86ea300d33694f4bfe071ee11817d784cd3ba1785ac2",
+    "gsw-native-artifact-staged.json": "f440d20d8594f8e87897d6b2593f7762a3922b0f34b7eecacee618729f1b7c87",
+    "full-run40823880544-native-direct.log": "d3b6699c7cd0b6307f947c20cdd8a4c846fbadbf24a091e763e9a91511c8c413"
+  },
+  "auditSafety": {
+    "payloadDownloaded": false,
+    "setupDownloaded": false,
+    "upstreamLargeArtifactDownloaded": false,
+    "localGswApplicationInstallerTestCompilerOrVerifierExecuted": false,
+    "trainingStartedOrResumed": false,
+    "userDataOrInstallationOrShortcutsChanged": false,
+    "ciDispatchedOrCancelled": false,
+    "commitOrPushPerformed": false
+  },
+  "fullAcceptance": false,
+  "promotionAllowed": false,
+  "latestHeadAcceptanceClaim": false,
+  "laterSourceAcceptanceInherited": false
+}

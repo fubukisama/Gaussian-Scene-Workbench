@@ -719,6 +719,28 @@ if(BUILD_TESTING)
     src/UiSurfaceEvidence.cpp src/UiSurfaceEvidence.h tests/UiFormVisualProbe.h)
   target_link_libraries(gsw_initialization_dialog_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data")
+  set(_gsw_initialization_publication_root "${CMAKE_CURRENT_BINARY_DIR}/initialization-publication-test-data")
+  if(DEFINED ENV{RUNNER_TEMP} AND IS_DIRECTORY "$ENV{RUNNER_TEMP}")
+    set(_gsw_use_runner_publication_root TRUE)
+    if(WIN32 AND DEFINED ENV{SystemDrive})
+      string(TOLOWER "$ENV{SystemDrive}" _gsw_system_drive)
+      string(SUBSTRING "$ENV{RUNNER_TEMP}" 0 2 _gsw_runner_drive)
+      string(SUBSTRING "${CMAKE_CURRENT_BINARY_DIR}" 0 2 _gsw_build_drive)
+      string(TOLOWER "${_gsw_runner_drive}" _gsw_runner_drive)
+      string(TOLOWER "${_gsw_build_drive}" _gsw_build_drive)
+      # Never move an already non-system build's new fixture onto the system
+      # volume. A system-volume/C-only build retains its usable temp silently.
+      if(_gsw_runner_drive STREQUAL _gsw_system_drive AND NOT _gsw_build_drive STREQUAL _gsw_system_drive)
+        set(_gsw_use_runner_publication_root FALSE)
+      endif()
+    endif()
+    if(_gsw_use_runner_publication_root)
+      set(_gsw_initialization_publication_root "$ENV{RUNNER_TEMP}/gsw-init-publication")
+    endif()
+  endif()
+  set(GSW_INITIALIZATION_PUBLICATION_TEST_ROOT "${_gsw_initialization_publication_root}" CACHE PATH
+    "Explicit owned positive-output fixture parent; original caller-root rejection cases are never relocated")
+  file(MAKE_DIRECTORY "${GSW_INITIALIZATION_PUBLICATION_TEST_ROOT}")
   foreach(target gsw_initialization_editor_ui_tests gsw_initialization_dialog_ui_tests)
     target_include_directories(${target} PRIVATE src)
     target_link_libraries(${target} PRIVATE gsw_native_language_resources)
@@ -733,7 +755,7 @@ if(BUILD_TESTING)
   add_test(NAME native_initialization_dialog_ui COMMAND gsw_initialization_dialog_ui_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}")
   set_tests_properties(native_initialization_editor_ui native_initialization_dialog_ui PROPERTIES TIMEOUT 180
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_INITIALIZATION_PUBLICATION_TEST_ROOT=${GSW_INITIALIZATION_PUBLICATION_TEST_ROOT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   if(WIN32)
     set(GSW_UI_SURFACE_CAPTURE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/ui-surface-evidence" CACHE PATH
@@ -742,7 +764,7 @@ if(BUILD_TESTING)
     add_test(NAME native_initialization_ui_surfaces COMMAND gsw_initialization_dialog_ui_tests
       "${CMAKE_CURRENT_SOURCE_DIR}/.." "${Python3_EXECUTABLE}" --smoke-test-ui-forms)
     set_tests_properties(native_initialization_ui_surfaces PROPERTIES TIMEOUT 180
-      ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
+      ENVIRONMENT "QT_QPA_PLATFORM=windows;GSW_INITIALIZATION_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/initialization-test-data;GSW_INITIALIZATION_PUBLICATION_TEST_ROOT=${GSW_INITIALIZATION_PUBLICATION_TEST_ROOT};GSW_UI_SURFACE_EVIDENCE=${GSW_UI_SURFACE_CAPTURE_ROOT};GSW_UI_SOURCE_COMMIT=${GSW_UI_SURFACE_SOURCE_COMMIT};PYTHONUTF8=1;PYTHONIOENCODING=utf-8"
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
   qt_add_executable(gsw_mesh_geometry_dialog_ui_tests tests/MeshGeometryDialogUiTests.cpp
