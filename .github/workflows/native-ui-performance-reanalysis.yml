@@ -119,6 +119,11 @@ jobs:
           # workflow's success means data replay completed, never performance PASS.
           if ($result.status -ceq 'FAIL') { throw 'Reanalysis found a failure; retained evidence is authoritative.' }
           if ($analysisExit -eq 3) { Write-Output 'Reanalysis completed with retained INCONCLUSIVE metrics; not full performance acceptance.' }
+          # The Python data verdict remains exit 3 / INCONCLUSIVE in its raw
+          # receipt. All replay assertions above succeeded; do not let pwsh's
+          # generated LASTEXITCODE epilogue turn that into a replay failure.
+          # Explicit FAIL/contract exceptions still stop before this boundary.
+          exit 0
       - name: Retain original bytes, provenance, and separately identified reanalysis
         if: always()
         uses: actions/upload-artifact@v7

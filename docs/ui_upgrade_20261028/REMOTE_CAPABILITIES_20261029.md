@@ -1,15 +1,19 @@
 # Remote Windows / GPU capability audit — 2026-10-29
 
-This is a capability inventory and a proposed read-only probe, **not** a new UI,
+This is a capability inventory and a completed read-only remote probe, **not** a new UI,
 performance, NVIDIA, native OS-scaling, or full-acceptance result. No local
 application, detector, GPU query, test or GUI was run. No local GSW process,
 stable entry point, user data, driver or Windows display setting was touched.
 
 ## Identity and current findings
 
-Audit observation: `2026-10-29T04:52:35.8516463Z`. The shared checkout was
+Initial audit observation: `2026-10-29T04:52:35.8516463Z`. The shared checkout was
 `e48d535683d5d5269e422971e53c7ea104f9fd4e`. This does not bind historical
-acceptance to that commit. Machine-readable findings are in
+acceptance to that commit. The subsequent exact remote inventory snapshot was
+observed at `2026-10-29T05:01:41.7265961Z`, source
+`ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8`,
+[run 40820863090](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40820863090).
+Machine-readable findings are in
 `REMOTE_CAPABILITIES_20261029.json`.
 
 | Resource / test boundary | Actual evidence | Meaning / remaining limit |
@@ -17,10 +21,10 @@ acceptance to that commit. Machine-readable findings are in
 | Repository-visible self-hosted runners | Authenticated repository API returned `total_count: 0`, `runners: []` | No registered self-hosted test runner is available through this repository at observation time. This is not an inventory of the whole account or every cloud service. |
 | Codex saved execution context | 34 project metadata entries: 17 local projects with local host; 17 ChatGPT projects with unspecified host; 0 nonlocal host entries | No configured nonlocal Windows execution machine was established. An unspecified/cloud project is not evidence of a usable remote GPU machine. Names, host display names and project paths were omitted. |
 | Hosted Windows / software GL | Existing exact historical candidate produced native-window captures using Mesa llvmpipe | Available for bounded Qt/software-GL regression tests; not NVIDIA hardware acceptance. |
-| Actual Windows 100% scaling | Historical captures report window DPI `96` | Observed only for that historical candidate. Not proof that latest main passed. |
+| Actual Windows 100% scaling | New remote inventory reports a per-monitor-aware (`2`) owned hidden HWND at DPI `96`; historical candidate also had window DPI `96` | Real OS 100% inventory is confirmed for that runner; no new GSW/Qt runtime acceptance is implied. |
 | Actual Windows 125/150/175/200% | No such window DPI in the inspected evidence | Untested. Qt DPR values alone cannot close these gates. |
-| Actual mixed-DPI cross-monitor movement | No confirmed remote monitor topology or transition evidence | Untested; two painter metadata records are not two monitors. |
-| NVIDIA provider / actual resident VRAM | No confirmed authorized remote NVIDIA environment | Unknown and untested, not zero, unlimited, or passed. |
+| Actual mixed-DPI cross-monitor movement | New remote snapshot enumerates 1 display, primary rectangle `1024×768`, work area `1024×728` | No cross-monitor transition executed. One display cannot exercise a real two-display transition; historical painter metadata is not topology evidence. |
+| NVIDIA provider / actual resident VRAM | New CIM candidate is `Microsoft Hyper-V Video`; `nvidia-smi` status is `not_found` | NVIDIA runtime and resident VRAM remain unknown/untested. An absent utility does not prove zero NVIDIA hardware. |
 | GitHub GPU/larger-runner entitlement | Not queried or provisioned | No billing, rental, account-wide resource discovery or new runner registration was attempted. |
 
 The live query used the repository
@@ -31,6 +35,45 @@ GitHub documents standard Windows VM runners separately from the larger-runner
 feature that can include GPUs. That feature's existence does not establish this
 repository's entitlement or current availability.
 [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+## Exact completed read-only remote snapshot
+
+The root agent reviewed and committed the prepared probe at
+`ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8`, then ran the manual workflow once.
+The root reports [run 40820863090](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40820863090)
+as `SUCCESS`. This follow-up did not re-query CI, rerun the probe or download a
+second copy. It read the root's existing receipt and independently checked its
+SHA-256:
+
+- Receipt: `D:/Codex/validation/gsw-ui-upgrade-20261028/capabilities-run40820863090/resource-snapshot.json`.
+- Receipt SHA-256: `e4b35342b736d7e9e5fc8c41741464bd3d20bf83e6d049e42bc6d0126c953291`.
+- Recorded source: `ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8`;
+  probe SHA-256: `b9fd968110c90adaf5068b0597dc546e9faff392ae10419427a51ee8b56a4eac`.
+- Snapshot observation: `2026-10-29T05:01:41.7265961Z`; Windows X64,
+  OS version `10.0.20348.0`.
+- Native display: `displayMonitorCount=1`, `enumeratedMonitorCount=1`,
+  primary rectangle `[0,0,1024,768]`, work rectangle `[0,0,1024,728]`;
+  owned hidden HWND awareness `2`, DPI `96`, actual OS scale `100%`.
+- Adapter inventory candidate: `Microsoft Hyper-V Video`, driver
+  `10.0.20348.1`, runtime compatibility **not tested**.
+- `nvidia-smi`: `not_found`, no management candidates returned,
+  `runtimeUsableDevices=null`. This means the command was not found, not that
+  NVIDIA hardware is universally absent or that available VRAM equals zero.
+- Process-visible logical CPU count `4`; host RAM `17,174,360,064` bytes total,
+  `14,563,098,624` bytes available at that instant. Effective allocation is
+  unknown; these are not product resource entitlements or stress-test results.
+
+The receipt reports no application/workload launch, no visible window, and no
+display-mode, OS-scale or driver change. It explicitly leaves GSW/Qt, OpenGL,
+CUDA, resident VRAM, OS scaling transitions and application cross-monitor
+movement untested. No OpenGL provider was queried by this inventory, so the new
+Hyper-V adapter observation must not be combined with historical Mesa evidence
+as if both came from one product run.
+
+This is a single ephemeral runner's baseline **before** the existing display
+setup helper. Its `1024×768` desktop is not a contradiction of the helper's
+supported-mode resolution selection and does not prove which additional modes
+would work. No attempt was made to change that baseline.
 
 ## Exact existing native-window evidence
 
@@ -66,9 +109,10 @@ those modes. The existing graphics helper deliberately selects the pinned Mesa
 physical GPU is absent; it proves which provider the tested process used.
 Helper file hashes are recorded in the JSON.
 
-## Prepared remote-only, read-only snapshot
+## Remote-only, read-only probe: preparation and completed scope
 
-New files, awaiting parent review before commit/push/manual dispatch:
+Originally prepared pending parent review at the initial audit; subsequently
+reviewed, committed and run once by the root as identified above:
 
 - `scripts/probe_native_ci_capabilities.ps1`
 - `.github/workflows/native-ui-capabilities.yml`
@@ -164,8 +208,8 @@ is:
    an RDP session could still select a different rendering provider.
 
 This sequence is a proposal, not authorization to configure RDP or acquire a
-machine. No resource purchase or account-wide discovery is needed for the
-first read-only hosted-runner snapshot.
+machine. The completed read-only hosted-runner snapshot required no resource
+purchase or account-wide discovery.
 
 ## Consolidated environment question (for parent, not sent to user)
 
@@ -181,9 +225,12 @@ an authorized substitute for remote acceptance.
 ## Static validation and method reference
 
 Local validation is limited to PowerShell AST parsing, JSON/YAML parsing, and
-file/diff checks. The probe, hidden HWND creation, CIM calls, and `nvidia-smi`
-have **not run locally or remotely** in this change. No commit/push/dispatch has
-been performed by this capability subtask.
+file/diff checks. The probe and its owned hidden HWND/CIM observations ran only
+on the remote workflow identified above; the optional `nvidia-smi` invocation
+was skipped because its command was absent. Nothing ran locally. This
+capability subtask did not commit/push/dispatch or repeat the root's single
+download/run; this follow-up only updates the two report files from the verified
+receipt.
 
 The `get-available-resources` skill materially guided the distinction between
 inventory, effective resource limits and runtime usability, along with

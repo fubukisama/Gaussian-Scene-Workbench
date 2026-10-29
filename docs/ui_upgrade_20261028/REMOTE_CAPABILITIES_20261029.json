@@ -1,6 +1,7 @@
 {
   "schema": "gsw.remote_capability_audit/1",
   "auditedUtc": "2026-10-29T04:52:35.8516463Z",
+  "latestRemoteSnapshotObservedUtc": "2026-10-29T05:01:41.7265961Z",
   "repository": "fubukisama/Gaussian-Scene-Workbench",
   "checkoutCommitAtAudit": "e48d535683d5d5269e422971e53c7ea104f9fd4e",
   "scope": "remote capability discovery; not product, hardware or promotion acceptance",
@@ -35,6 +36,50 @@
     "configuredRunnerLabel": null,
     "availableForThisTask": null,
     "rentalOrBillingChangesMade": false
+  },
+  "completedReadOnlyRemoteSnapshot": {
+    "sourceCommit": "ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8",
+    "runId": "40820863090",
+    "runUrl": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40820863090",
+    "workflowConclusionReportedByRoot": "SUCCESS",
+    "observedUtc": "2026-10-29T05:01:41.7265961Z",
+    "snapshotSchema": "gsw.remote_ci_capabilities/1",
+    "snapshotKind": "read_only_remote_inventory_not_product_acceptance",
+    "localReceipt": "D:/Codex/validation/gsw-ui-upgrade-20261028/capabilities-run40820863090/resource-snapshot.json",
+    "receiptSha256": "e4b35342b736d7e9e5fc8c41741464bd3d20bf83e6d049e42bc6d0126c953291",
+    "receiptSha256Verified": true,
+    "probeSha256": "b9fd968110c90adaf5068b0597dc546e9faff392ae10419427a51ee8b56a4eac",
+    "platform": { "family": "Windows", "architecture": "X64", "osVersion": "10.0.20348.0" },
+    "display": {
+      "status": "ok",
+      "displayMonitorCount": 1,
+      "enumeratedMonitorCount": 1,
+      "physicalRect": [0, 0, 1024, 768],
+      "workRect": [0, 0, 1024, 728],
+      "ownedHiddenWindowDpi": 96,
+      "ownedHiddenWindowDpiAwareness": 2,
+      "actualOsScalePercent": 100,
+      "applicationCrossMonitorTransition": "not_tested"
+    },
+    "videoControllerCandidate": {
+      "model": "Microsoft Hyper-V Video",
+      "driverVersion": "10.0.20348.1",
+      "runtimeCompatibility": "not_tested",
+      "runtimeUsableDevices": null
+    },
+    "nvidiaManagementInventory": {
+      "status": "not_found",
+      "candidates": [],
+      "runtimeUsableDevices": null,
+      "interpretation": "nvidia-smi command was not found; not proof of zero NVIDIA hardware or usable VRAM"
+    },
+    "processVisibleLogicalCpuCount": 4,
+    "hostMemoryBytes": { "total": 17174360064, "availableAtObservation": 14563098624, "effectiveAllocation": null },
+    "applicationOrWorkloadStarted": false,
+    "visibleWindowShown": false,
+    "displayScaleModeOrDriverChanged": false,
+    "productAcceptance": false,
+    "scopeLimit": "one ephemeral runner inventory at this observation; no GSW/Qt/OpenGL/CUDA workload or scaling transition was executed"
   },
   "historicalNativeWindowEvidence": {
     "sourceCommit": "de764f0a5ef3a8e813ec38ed19e3f232e4c83fbe",
@@ -81,12 +126,12 @@
   },
   "capabilityBoundary": {
     "remoteControlledQtDprSoftwareGl": "verified_historical_candidate_only",
-    "nativeOsScale100Percent": "observed_historical_candidate_only",
+    "nativeOsScale100Percent": "observed_remote_inventory_and_historical_candidate_only_not_latest_product_acceptance",
     "nativeOsScale125Percent": "not_tested",
     "nativeOsScale150Percent": "not_tested",
     "nativeOsScale175Percent": "not_tested",
     "nativeOsScale200Percent": "not_tested",
-    "realCrossMonitorTransition": "not_tested_no_confirmed_remote_topology",
+    "realCrossMonitorTransition": "not_tested_single_display_observed_in_remote_snapshot",
     "nvidiaOpenGlRuntime": "not_tested_no_confirmed_authorized_remote_gpu",
     "actualResidentVram": "not_tested",
     "runtimeUsableGpuCount": null,
@@ -96,7 +141,15 @@
   "preparedReadOnlyProbe": {
     "script": "scripts/probe_native_ci_capabilities.ps1",
     "workflow": ".github/workflows/native-ui-capabilities.yml",
-    "status": "prepared_not_run_pending_parent_review",
+    "status": "completed_remote_read_only_snapshot_receipt_verified",
+    "preparationHistory": {
+      "statusAtInitialAudit": "prepared_not_run_pending_parent_review",
+      "initialAuditUtc": "2026-10-29T04:52:35.8516463Z",
+      "reviewAndExecution": "root reviewed, committed and dispatched once; capability subtask did not dispatch or download"
+    },
+    "sourceCommit": "ed43bd6f4a88bc277190e3589bd9f8f7a0c3a7a8",
+    "runId": "40820863090",
+    "receiptSha256": "e4b35342b736d7e9e5fc8c41741464bd3d20bf83e6d049e42bc6d0126c953291",
     "trigger": "workflow_dispatch only",
     "runner": "windows-2022",
     "productBuildOrApplicationLaunch": false,
