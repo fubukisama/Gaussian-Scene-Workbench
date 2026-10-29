@@ -1,0 +1,269 @@
+name: README real native operation video
+
+on:
+  workflow_dispatch:
+    inputs:
+      training_bundle_path:
+        description: Repository-relative ZIP containing demo_manifest.json and approved real training snapshots (leave empty for URL)
+        type: string
+        default: ''
+      training_bundle_url:
+        description: HTTPS ZIP URL (only when training_bundle_path is empty; never credentials in the URL)
+        type: string
+        default: ''
+      training_bundle_sha256:
+        description: Required SHA256 of the exact training ZIP, reviewed before dispatch
+        required: true
+        type: string
+
+# Read-only downloads. This workflow has no release, installation, source push,
+# promotion, model-quality, or live-remote-training authority.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  record:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      DEMO_ROOT: ${{ runner.temp }}/gsw-readme-real-operation
+      # These are deliberate historical package coordinates, NOT current-main
+      # acceptance. The artifact name predates its current product version.
+      NATIVE_RUN_ID: '40743102181'
+      # The sibling portable artifact is intentionally NOT used: read-only
+      # inspection found omitted dotfiles (including backend .gitignore and 17
+      # corresponding-source files). The genuine Setup embeds the full payload.
+      NATIVE_ARTIFACT_ID: '12843483344'
+      NATIVE_SOURCE_SHA: a5393be3772b8d49c6be93a767dc7dfd5abcec5a
+      NATIVE_ARTIFACT_SHA256: bf46cefeb0b8224ab7c59a3f545c24871bb59a64bd89e0db7175f80d1d2dd7b0
+      NATIVE_EXECUTABLE_SHA256: e33c28987d793b91c66e1e061297820b11941cc4fa98e7d1a82802d11e309dba
+      NATIVE_SETUP_SHA256: 47c0b7cf4ba841dc7c71ef37dcbde33eb026f997823091993350318acf46dc3d
+    steps:
+      - name: Checkout capture driver only (no application build changes)
+        uses: actions/checkout@v7
+
+      - name: Set up isolated capture Python
+        id: python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Provision pinned external input and capture dependencies
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted') { throw 'A disposable GitHub-hosted runner is required.' }
+          New-Item -ItemType Directory -Path $env:DEMO_ROOT | Out-Null
+          & '${{ steps.python.outputs.python-path }}' -m pip install --no-input pywinauto==0.6.8 comtypes==1.4.8 pywin32==308 Pillow==11.0.0 imageio-ffmpeg==0.6.0
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned capture dependencies could not be provisioned.' }
+          & '${{ steps.python.outputs.python-path }}' -m pip freeze | Out-File -LiteralPath "$env:DEMO_ROOT/capture-dependencies.txt" -Encoding utf8
+
+      - name: Verify successful source-bound native run and download exact artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:NATIVE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -cne 'success' -or $run.head_sha -cne $env:NATIVE_SOURCE_SHA) {
+            throw 'Native binary source run is not the pinned successful revision.'
+          }
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:NATIVE_ARTIFACT_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $artifact.expired -or $artifact.workflow_run.id -ne [long]$env:NATIVE_RUN_ID -or
+              $artifact.workflow_run.head_sha -cne $env:NATIVE_SOURCE_SHA -or
+              $artifact.digest -cne "sha256:$env:NATIVE_ARTIFACT_SHA256") {
+            throw 'Pinned native artifact run, head, expiry or archive digest mismatch.'
+          }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:NATIVE_ARTIFACT_ID/zip" `
+            -Headers $headers -OutFile "$env:DEMO_ROOT/native-artifact.zip"
+          if ((Get-FileHash -LiteralPath "$env:DEMO_ROOT/native-artifact.zip" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:NATIVE_ARTIFACT_SHA256) {
+            throw 'Downloaded native artifact SHA256 mismatch.'
+          }
+          $run | ConvertTo-Json -Depth 10 | Out-File -LiteralPath "$env:DEMO_ROOT/native-source-run.json" -Encoding utf8
+          $artifact | ConvertTo-Json -Depth 10 | Out-File -LiteralPath "$env:DEMO_ROOT/native-artifact-metadata.json" -Encoding utf8
+
+      - name: Acquire exact approved training bundle (not live remote optimization)
+        shell: pwsh
+        env:
+          INPUT_PATH: ${{ inputs.training_bundle_path }}
+          INPUT_URL: ${{ inputs.training_bundle_url }}
+          INPUT_SHA256: ${{ inputs.training_bundle_sha256 }}
+        run: |
+          if ($env:INPUT_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw 'A lowercase 64-digit SHA256 is required.' }
+          if ([bool]$env:INPUT_PATH -eq [bool]$env:INPUT_URL) { throw 'Choose exactly one training ZIP source.' }
+          $destination = Join-Path $env:DEMO_ROOT 'training-bundle.zip'
+          if ($env:INPUT_PATH) {
+            if ([IO.Path]::IsPathRooted($env:INPUT_PATH)) { throw 'Training ZIP path must be repository relative.' }
+            $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\') + '\'
+            $source = [IO.Path]::GetFullPath((Join-Path $workspace $env:INPUT_PATH))
+            if (-not $source.StartsWith($workspace, [StringComparison]::OrdinalIgnoreCase)) { throw 'Training ZIP escaped the checkout.' }
+            Copy-Item -LiteralPath $source -Destination $destination
+          } else {
+            $uri = [Uri]$env:INPUT_URL
+            if ($uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $uri.IsLoopback) {
+              throw 'Use a public HTTPS input URL without credentials, query tokens or fragments.'
+            }
+            Invoke-WebRequest -Uri $uri -OutFile $destination
+          }
+          if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:INPUT_SHA256) {
+            throw 'Approved training bundle digest mismatch.'
+          }
+
+      - name: Extract bounded archives without links or traversal
+        shell: pwsh
+        run: |
+          @'
+          import os, stat, zipfile
+          from pathlib import Path, PurePosixPath
+          root = Path(os.environ['DEMO_ROOT'])
+          for archive, folder in [('native-artifact.zip','setup'),('training-bundle.zip','training')]:
+              target = root / folder
+              target.mkdir()
+              with zipfile.ZipFile(root/archive) as z:
+                  rows = z.infolist()
+                  if len(rows) > 50000 or sum(x.file_size for x in rows) > 2*1024**3:
+                      raise ValueError('Archive exceeds bounded file/size limits')
+                  seen = set()
+                  for row in rows:
+                      name = row.filename.rstrip('/')
+                      parts = PurePosixPath(name).parts
+                      if (not name or '\\' in name or ':' in name or name.startswith('/')
+                          or any(p in ('','.','..','.git') for p in name.split('/'))
+                          or name.casefold() in seen
+                          or stat.S_ISLNK(row.external_attr >> 16)):
+                          raise ValueError('Unsafe archive entry')
+                      seen.add(name.casefold())
+                      (target/name).resolve().relative_to(target.resolve())
+                  z.extractall(target)
+          '@ | & '${{ steps.python.outputs.python-path }}' -I -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Archive validation/extraction failed.' }
+
+      - name: Install genuine Setup only inside the disposable runner
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted') { throw 'Local installation is forbidden.' }
+          $install = Join-Path $env:DEMO_ROOT 'package'
+          if (Test-Path -LiteralPath $install) { throw 'Installation target must be fresh.' }
+          $setups = @(Get-ChildItem -LiteralPath "$env:DEMO_ROOT/setup" -Filter '*.exe' -File)
+          if ($setups.Count -ne 1) { throw 'Exactly one genuine Setup executable is required.' }
+          $setup = $setups[0].FullName
+          $metadata = Get-Content -LiteralPath ($setup + '.json') -Raw | ConvertFrom-Json
+          $setupHash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hashSidecar = (Get-Content -LiteralPath ($setup + '.sha256') -Raw).Split()[0]
+          if ($metadata.schema -cne 'gsw-windows-installer-v1' -or $metadata.testBuild -or $metadata.installerFixture -or
+              $metadata.appId -cne 'Fubukisama.GaussianSceneWorkbench.Native' -or
+              $metadata.trainingRuntimesBundled -or $metadata.automaticAppLaunch -or
+              $metadata.setupSha256 -cne $setupHash -or $hashSidecar -cne $setupHash -or
+              $setupHash -cne $env:NATIVE_SETUP_SHA256 -or
+              $metadata.executableSha256 -cne $env:NATIVE_EXECUTABLE_SHA256) {
+            throw 'Genuine Setup sidecars or pinned native executable identity mismatch.'
+          }
+          $registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $metadata.appId + '_is1'
+          if (Test-Path -LiteralPath $registration) { throw 'A prior native registration exists; refusing to replace it.' }
+          $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS',
+            '/NOCLOSEAPPLICATIONS', '/NORESTARTAPPLICATIONS', '/TASKS=!desktopicon', '/LANG=en_US',
+            ('/DIR=' + $install), ('/LOG=' + (Join-Path $env:DEMO_ROOT 'installer.log')))
+          $quoted = @($arguments | ForEach-Object { '"' + $_ + '"' })
+          $process = Start-Process -FilePath $setup -ArgumentList $quoted -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Only the owned Setup process exceeded its time budget.' }
+          if ($process.ExitCode -ne 0) { throw "Genuine Setup failed ($($process.ExitCode)); no security-policy bypass is permitted." }
+          $record = Get-ItemProperty -LiteralPath $registration
+          if ([IO.Path]::GetFullPath($record.InstallLocation).TrimEnd('\') -cne [IO.Path]::GetFullPath($install).TrimEnd('\') -or
+              $record.DisplayVersion -cne $metadata.version) { throw 'Installed registration does not match the isolated adapter.' }
+          if ((Get-FileHash -LiteralPath (Join-Path $install 'bin/Gaussian Scene Workbench.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:NATIVE_EXECUTABLE_SHA256) {
+            throw 'Installed native EXE differs from the pinned source-run executable.'
+          }
+          [ordered]@{ schema='gsw.readme_installer_adapter/1'; artifactId=$env:NATIVE_ARTIFACT_ID;
+            archiveSha256=$env:NATIVE_ARTIFACT_SHA256; setupSha256=$setupHash; appId=$metadata.appId;
+            executableSha256=$env:NATIVE_EXECUTABLE_SHA256; sourceCommit=$env:NATIVE_SOURCE_SHA;
+            installLocation=$record.InstallLocation; displayVersion=$record.DisplayVersion;
+            registrationPath=$registration; autoLaunch=$false; desktopAndStartMenuIcons=$false;
+            isolatedDisposableRunner=$true; publicReleaseAcceptance=$false
+          } | ConvertTo-Json -Depth 6 | Out-File -LiteralPath "$env:DEMO_ROOT/installer-adapter-receipt.json" -Encoding utf8
+
+      - name: Verify complete installed package and bind executable digest
+        shell: pwsh
+        run: |
+          & '${{ steps.python.outputs.python-path }}' -I -B scripts/verify_native_artifact.py `
+            --root "$env:DEMO_ROOT/package" --output "$env:DEMO_ROOT/portable-verification.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable package/source/executable verification failed.' }
+          @'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path(os.environ['DEMO_ROOT'])/'package'
+          manifest=json.loads((root/'installer-payload.json').read_text(encoding='utf-8-sig'))
+          if manifest.get('schema')!='gsw-installer-payload-v1' or manifest.get('executableSha256')!=os.environ['NATIVE_EXECUTABLE_SHA256']:
+              raise ValueError('Installed payload manifest/native identity mismatch')
+          rows=manifest.get('files')
+          if not isinstance(rows,list) or not rows:
+              raise ValueError('Missing installed payload file records')
+          for row in rows:
+              relative=row['path']
+              if '\\' in relative or ':' in relative or relative.startswith('/') or any(p in ('','.','..') for p in relative.split('/')):
+                  raise ValueError('Unsafe payload path')
+              path=root/relative
+              path.resolve().relative_to(root.resolve())
+              if not path.is_file() or path.stat().st_size!=row['size'] or hashlib.sha256(path.read_bytes()).hexdigest()!=row['sha256']:
+                  raise ValueError('Installed manifest file missing or altered: '+relative)
+          print('Verified genuine installed payload:',len(rows),'files; no application was launched')
+          '@ | & '${{ steps.python.outputs.python-path }}' -I -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Genuine installed payload closure failed.' }
+          $receipt = Get-Content -LiteralPath "$env:DEMO_ROOT/portable-verification.json" -Raw | ConvertFrom-Json
+          if ($receipt.status -cne 'PASS') { throw 'Portable verification receipt is not a pass.' }
+          $manifest = Get-Content -LiteralPath "$env:DEMO_ROOT/package/build_manifest.json" -Raw | ConvertFrom-Json
+          $receipt | Add-Member -NotePropertyName binarySourceCommit -NotePropertyValue $env:NATIVE_SOURCE_SHA
+          $receipt | Add-Member -NotePropertyName binarySourceRunId -NotePropertyValue $env:NATIVE_RUN_ID
+          $receipt | Add-Member -NotePropertyName binaryArtifactId -NotePropertyValue $env:NATIVE_ARTIFACT_ID
+          $receipt | Add-Member -NotePropertyName artifactArchiveSha256 -NotePropertyValue $env:NATIVE_ARTIFACT_SHA256
+          $receipt | Add-Member -NotePropertyName actualProductVersion -NotePropertyValue $manifest.version
+          $receipt | Add-Member -NotePropertyName currentMainAcceptance -NotePropertyValue $false
+          $receipt | Add-Member -NotePropertyName binaryAcquisition -NotePropertyValue 'genuine Setup adapter on disposable runner; no public installation/promotion'
+          $receipt | ConvertTo-Json -Depth 8 | Out-File -LiteralPath "$env:DEMO_ROOT/package-receipt.json" -Encoding utf8
+
+      - name: Prepare actual display and isolated software OpenGL
+        shell: pwsh
+        run: |
+          ./scripts/setup_native_ci_display.ps1
+          $mode = [Gsw.NativeCiDisplay]::CurrentMode()
+          if ($mode.dmPelsWidth -lt 1640 -or $mode.dmPelsHeight -lt 1020) {
+            $candidate = [Gsw.NativeCiDisplay]::SupportedModes() | Where-Object {
+              $_.dmPelsWidth -ge 1640 -and $_.dmPelsHeight -ge 1020 -and $_.dmBitsPerPel -eq 32
+            } | Sort-Object { [long]$_.dmPelsWidth * $_.dmPelsHeight } | Select-Object -First 1
+            if (-not $candidate -or [Gsw.NativeCiDisplay]::TestMode($candidate) -ne 0 -or
+                [Gsw.NativeCiDisplay]::ApplyMode($candidate) -ne 0) {
+              throw 'No supported real display mode fits an unscaled 1600x936 native client.'
+            }
+          }
+          ./scripts/setup_native_ci_graphics.ps1 -OutputDirectory "$env:DEMO_ROOT/mesa"
+
+      - name: Record real native imports, snapshot replay, navigation, transform and export
+        shell: pwsh
+        run: |
+          ./scripts/record_readme_demo.ps1 -PackageRoot "$env:DEMO_ROOT/package" `
+            -TrainingRoot "$env:DEMO_ROOT/training" -OutputDirectory "$env:DEMO_ROOT/evidence" `
+            -PackageReceipt "$env:DEMO_ROOT/package-receipt.json" `
+            -PythonExecutable '${{ steps.python.outputs.python-path }}'
+
+      - name: Retain original recording, exact data, verification and failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: readme-real-native-operation-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gsw-readme-real-operation/evidence/
+            ${{ runner.temp }}/gsw-readme-real-operation/training-bundle.zip
+            ${{ runner.temp }}/gsw-readme-real-operation/package-receipt.json
+            ${{ runner.temp }}/gsw-readme-real-operation/portable-verification.json
+            ${{ runner.temp }}/gsw-readme-real-operation/native-source-run.json
+            ${{ runner.temp }}/gsw-readme-real-operation/native-artifact-metadata.json
+            ${{ runner.temp }}/gsw-readme-real-operation/capture-dependencies.txt
+            ${{ runner.temp }}/gsw-readme-real-operation/installer-adapter-receipt.json
+            ${{ runner.temp }}/gsw-readme-real-operation/installer.log
+            ${{ runner.temp }}/gsw-readme-real-operation/setup/*.exe.json
+            ${{ runner.temp }}/gsw-readme-real-operation/setup/*.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
