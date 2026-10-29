@@ -112,7 +112,10 @@ private slots:
   void init() {
     QSettings().clear();
     QVERIFY(AppLanguage::apply(QString::fromLatin1("zh_CN"), false));
-    root = temporary.filePath(QString::fromLatin1(QTest::currentTestFunction()));
+    QString caseName = QString::fromLatin1(QTest::currentTestFunction());
+    if (const auto *tag = QTest::currentDataTag(); tag && *tag)
+      caseName += QLatin1Char('-') + QString::fromLatin1(tag);
+    root = temporary.filePath(caseName);
     const auto application = path("versions/ui-fixture-a/bin/Gaussian Scene Workbench.exe");
     const QByteArray fake("owned canonical application identity; never executed");
     QVERIFY(write(application, fake));

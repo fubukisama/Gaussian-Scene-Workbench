@@ -52,7 +52,9 @@ def verify(args):
     global OWNED_EVIDENCE
     if os.environ.get("GITHUB_ACTIONS", "").lower() != "true" or sys.platform != "win32":
         raise ValueError("source_bundle_remote_windows_only")
-    if (os.environ.get("GITHUB_REPOSITORY", "").casefold() != "fubukisama/gaussian-scene-workbench"
+    if (os.environ.get("GITHUB_REPOSITORY", "").casefold() != "fubukisama/gaussiansplattingworkbench"
+            or os.environ.get("GITHUB_REPOSITORY_ID") != "1286130219"
+            or os.environ.get("GITHUB_REPOSITORY_OWNER_ID") != "237571720"
             or os.environ.get("GITHUB_REF") != "refs/heads/main"):
         raise ValueError("source_bundle_repository_not_main")
     root, repository, evidence = args.root.absolute(), args.repository.absolute(), args.evidence.absolute()

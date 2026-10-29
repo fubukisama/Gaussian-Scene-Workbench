@@ -123,6 +123,14 @@ def owned_parent_ids(process_ids):
 
 
 class LiveUpdate(unittest.TestCase):
+    def assert_same_live_process(self, diagnostic, original):
+        current = diagnostic.snapshot()
+        self.assertIs(current.get("opened"), True)
+        self.assertIs(current.get("signalled"), False)
+        self.assertEqual(current["processCreationTime"], original["processCreationTime"])
+        self.assertEqual(Path(current["image"]).resolve(), Path(original["image"]).resolve())
+        return current
+
     def wait_json(self, path, predicate, timeout=10):
         deadline = time.monotonic() + timeout
         value = {}
@@ -201,7 +209,7 @@ class LiveUpdate(unittest.TestCase):
         launcher = subprocess.Popen([str(root / "bin/Gaussian Scene Workbench Launcher.exe")],
             env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW)
-        a_process = None
+        a_process, worker_process, worker_launcher_process = None, None, None
         try:
             self.assertEqual(launcher.wait(timeout=15), 0)
             a_record = self.wait_json(a_marker, lambda row: row.get("phase") == "shown")
@@ -217,6 +225,34 @@ class LiveUpdate(unittest.TestCase):
             a_window = self.window_for_pid(a_record["pid"])
             worker_before = self.wait_json(queue_path, lambda row: row.get("step", 0) >= 2)
             self.assertIsNone(worker.poll())
+            self.assertEqual(worker_before["taskId"], task_id)
+            identity = worker_before["workerIdentity"]
+            actual_worker_pid = identity["selfPid"]
+            self.assertIsInstance(actual_worker_pid, int)
+            self.assertGreater(actual_worker_pid, 0)
+            self.assertLessEqual(actual_worker_pid, 0xFFFFFFFF)
+            parent_ids = owned_parent_ids({worker.pid, actual_worker_pid})
+            self.assertEqual(parent_ids[str(worker.pid)], os.getpid())
+            expected_parent = worker.pid if actual_worker_pid != worker.pid else os.getpid()
+            self.assertEqual(parent_ids[str(actual_worker_pid)], expected_parent)
+            self.assertEqual(identity["parentPid"], expected_parent)
+            self.assertEqual(Path(identity["sysExecutable"]).resolve(), Path(sys.executable).resolve())
+            self.assertEqual(Path(identity["baseExecutable"]).resolve(), Path(sys._base_executable).resolve())
+            # Windows venv python.exe may be a redirector. Bind the actual
+            # script process only after independently proving this exact owned
+            # parent chain, expected image and OS birth; never accept any PID.
+            worker_launcher_process = MODULE.ProcessDiagnostic(worker.pid)
+            worker_process = MODULE.ProcessDiagnostic(actual_worker_pid)
+            launcher_before, actual_before = worker_launcher_process.snapshot(), worker_process.snapshot()
+            for snapshot in (launcher_before, actual_before):
+                self.assertIs(snapshot.get("opened"), True)
+                self.assertIs(snapshot.get("signalled"), False)
+                self.assertRegex(snapshot["processCreationTime"], "^[0-9a-f]{16}$")
+            self.assertEqual(Path(launcher_before["image"]).resolve(), Path(sys.executable).resolve())
+            expected_image = sys._base_executable if actual_worker_pid != worker.pid else sys.executable
+            self.assertEqual(Path(actual_before["image"]).resolve(), Path(expected_image).resolve())
+            self.assertGreaterEqual(int(actual_before["processCreationTime"], 16),
+                                    int(launcher_before["processCreationTime"], 16))
             helper.select("B")
             install_started = time.monotonic_ns()
             helper.helper_request("live-install-B", "--install", "stable")
@@ -227,6 +263,8 @@ class LiveUpdate(unittest.TestCase):
             self.assertEqual(after_install["processCreationTime"], before["processCreationTime"])
             self.assertEqual(self.window_for_pid(a_record["pid"]), a_window)
             self.assertIsNone(worker.poll(), "updater must not end the owned CPU worker")
+            actual_after_install = self.assert_same_live_process(worker_process, actual_before)
+            self.assert_same_live_process(worker_launcher_process, launcher_before)
             queue_after = self.wait_json(queue_path, lambda row: row.get("step", 0) > worker_before["step"])
             self.assertEqual(queue_after["taskId"], task_id)
             self.assertEqual(queue_after["pausedTask"], initial["pausedTask"])
@@ -234,23 +272,17 @@ class LiveUpdate(unittest.TestCase):
                 ).splitlines(keepends=True) if line.endswith(b"\n")]
             during = [row for row in rows if install_started <= row["monotonicNs"] <= install_finished]
             self.assertTrue(during, "CPU queue must actually advance while B installs")
-            identity = queue_after.get("workerIdentity", {})
-            reported_pid = identity.get("selfPid")
+            self.assertEqual(queue_after["workerIdentity"], identity)
             facts = {"schema": "gsw.owned_worker_identity_diagnostic/1", "testOnly": True,
                 "formalGswAcceptance": False, "taskId": task_id,
                 "popenPid": worker.pid, "controllerPid": os.getpid(),
                 "controllerExecutable": sys.executable, "controllerBaseExecutable": sys._base_executable,
-                "workerSelfReport": identity, "eventPids": sorted({row["pid"] for row in rows})}
-            if isinstance(reported_pid, int) and 0 < reported_pid <= 0xFFFFFFFF:
-                facts["osParentIds"] = owned_parent_ids({worker.pid, reported_pid})
-                for name, pid in (("popenProcess", worker.pid), ("reportedWorkerProcess", reported_pid)):
-                    diagnostic = MODULE.ProcessDiagnostic(pid)
-                    try:
-                        facts[name] = diagnostic.snapshot()
-                    finally:
-                        diagnostic.close()
+                "workerSelfReport": identity, "eventPids": sorted({row["pid"] for row in rows}),
+                "osParentIds": parent_ids, "lineageValidated": True,
+                "popenProcessBefore": launcher_before, "actualWorkerBefore": actual_before,
+                "actualWorkerAfterInstall": actual_after_install}
             MODULE.write_json(ARGS.evidence / "worker-identity-diagnostic.json", facts)
-            self.assertTrue(all(row["pid"] == worker.pid and row["taskId"] == task_id for row in rows))
+            self.assertTrue(all(row["pid"] == actual_worker_pid and row["taskId"] == task_id for row in rows))
             b_record = helper.launch("B")
             self.assertNotEqual(b_record["pid"], a_record["pid"])
             after_b = a_process.snapshot()
@@ -258,6 +290,8 @@ class LiveUpdate(unittest.TestCase):
             self.assertEqual(after_b["processCreationTime"], before["processCreationTime"])
             self.assertEqual(self.window_for_pid(a_record["pid"]), a_window)
             self.assertIsNone(worker.poll())
+            self.assert_same_live_process(worker_process, actual_before)
+            self.assert_same_live_process(worker_launcher_process, launcher_before)
             for name, hashes in protected.items():
                 self.assertEqual(MODULE.tree_hashes(root / name), hashes, name)
             self.assertEqual((root / "bootstrap.json").read_bytes(), bootstrap)
@@ -268,6 +302,8 @@ class LiveUpdate(unittest.TestCase):
             final_a = self.wait_json(a_marker, lambda row: row.get("phase") == "normal_exit")
             self.assertEqual(final_a["exitCode"], 0)
             stop_path.write_bytes(b"owned-worker-release\n")
+            self.assertEqual(worker_process.kernel.WaitForSingleObject(worker_process.handle, 5000), 0)
+            self.assertEqual(worker_process.snapshot()["exitCode"], 0)
             self.assertEqual(worker.wait(timeout=5), 0)
             final_queue = json.loads(queue_path.read_text(encoding="utf-8"))
             self.assertEqual(final_queue["taskId"], task_id)
@@ -279,7 +315,9 @@ class LiveUpdate(unittest.TestCase):
                 "testOnly": True, "production": False, "formalGswAcceptance": False,
                 "scope": "signed-update-real-qt-window-and-owned-cpu-queue-only",
                 "oldWindowPid": a_record["pid"], "oldWindowBirth": before["processCreationTime"],
-                "newWindowPid": b_record["pid"], "workerPid": worker.pid,
+                "newWindowPid": b_record["pid"], "workerPid": actual_worker_pid,
+                "workerLauncherPid": worker.pid, "workerProcessCreationTime": actual_before["processCreationTime"],
+                "workerImage": actual_before["image"], "workerLineageValidated": True,
                 "workerTicksDuringInstall": len(during), "workerFinalStep": final_queue["step"],
                 "bootstrapUnchanged": True, "oldSlotUnchanged": True, "userDataUnchanged": True,
                 "pausedCpuSentinelUnchanged": True, "optimizerResume3DGS": "NOT_RUN",
@@ -297,6 +335,10 @@ class LiveUpdate(unittest.TestCase):
                     worker.kill()
                     worker.wait(timeout=5)
             worker.stderr.close()
+            if worker_process:
+                worker_process.close()
+            if worker_launcher_process:
+                worker_launcher_process.close()
             if a_process:
                 # Read-only process handle; never terminate a detached window.
                 a_process.close()

@@ -178,10 +178,11 @@ jobs:
           $env:TEMP="$PWD/native/.tmp-source-proof"; $env:TMP=$env:TEMP
           rustup toolchain install 1.99.1 --profile minimal --no-self-update
           if($LASTEXITCODE -ne 0){throw 'Source-proof pinned Rust unavailable.'}
+          New-Item -ItemType Directory -Path native/source-proof-evidence -Force | Out-Null
           python -I -B scripts/verify_native_update_source_bundle.py --root D:/gs/pkg `
             --repository "$PWD" --evidence "$PWD/native/source-proof-evidence" `
             --source-commit (git rev-parse HEAD).Trim() --source-tree (git rev-parse 'HEAD^{tree}').Trim() `
-            --cargo-home D:/gu/c
+            --cargo-home D:/gu/c 2>&1 | Tee-Object native/source-proof-evidence/closure.log
           if($LASTEXITCODE -ne 0){throw 'Actual corresponding-source closure failed.'}
       - uses: actions/upload-artifact@v7
         if: always()
@@ -667,7 +668,7 @@ jobs:
           cmake -S native/bootstrap-fixture -B D:/gb/build -G 'Visual Studio 17 2022' -A x64 `
             -DGSW_BOOTSTRAP_FIXTURE_ROOT=D:/gb/owned
           if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab configure failed.'}
-          cmake --build D:/gb/build --config Release --parallel --target gsw_bootstrap_fixture gsw_bootstrap_terminal_harness
+          cmake --build D:/gb/build --config Release --parallel --target gsw_bootstrap_fixture gsw_bootstrap_terminal_harness gsw_bootstrap_loader_probe
           if($LASTEXITCODE -ne 0){throw 'Isolated bootstrap lab build failed.'}
       - name: Actual restricted medium-integrity terminal bootstrap contract
         shell: pwsh
@@ -675,6 +676,7 @@ jobs:
           python -I -B scripts/test_native_bootstrap_fixture.py `
             --bootstrap 'D:/gb/build/Release/GSW Bootstrap Fixture.exe' `
             --harness 'D:/gb/build/Release/GSW Bootstrap Terminal Harness.exe' `
+            --loader-probe 'D:/gb/build/Release/GSW Bootstrap Loader Probe.exe' `
             --root D:/gb/owned --evidence D:/gb/evidence 2>&1 | Tee-Object D:/gb/evidence/first-bootstrap.log
           if($LASTEXITCODE -ne 0){throw 'Restricted terminal native bootstrap contract failed.'}
       - name: Bind bootstrap lab evidence to source

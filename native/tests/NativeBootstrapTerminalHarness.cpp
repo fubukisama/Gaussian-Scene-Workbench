@@ -17,12 +17,14 @@ struct LabDiagnostic {
   DWORD childExitCode = 0;
   size_t outputBytes = 0;
   std::string childCode;
+  Json access = Json::object();
   Json record(DWORD lastOsError) const {
     Json value{{"probeTag", "BOOTSTRAP-LAB-DIAG-1"}, {"stage", stage}, {"lastOsError", lastOsError},
         {"childCreated", childCreated}, {"childResumed", childResumed}, {"childTokenValidated", childTokenValidated},
         {"childExited", childExited}, {"capturedOutputBytes", outputBytes}};
     if (childExited) value["childExitCode"] = childExitCode;
     if (!childCode.empty()) value["childResponseCode"] = childCode;
+    if (!access.empty()) value["restrictedAccess"] = access;
     return value;
   }
 } diagnostic;
@@ -153,6 +155,44 @@ Desktop privateDesktop() {
   desktop.fullName = std::wstring(station.data()) + L"\\" + name;
   return desktop;
 }
+Json restrictedAccess(HANDLE token, const std::wstring &image, const Desktop &desktop) {
+  Json result;
+  const auto separator = desktop.fullName.find(L'\\');
+  need(separator != std::wstring::npos, "BOOTSTRAP_LAB_DESKTOP_FAILED");
+  const auto stationName = desktop.fullName.substr(0, separator);
+  const auto desktopName = desktop.fullName.substr(separator + 1);
+  std::array<wchar_t, 32768> system{};
+  const auto count = GetSystemDirectoryW(system.data(), DWORD(system.size()));
+  need(count && count < system.size(), "BOOTSTRAP_LAB_ACCESS_PROBE_FAILED");
+  if (!ImpersonateLoggedOnUser(token)) return {{"available", false}, {"osError", GetLastError()}};
+  struct Revert { bool active = true; ~Revert() { if (active) RevertToSelf(); } } revert;
+  result["available"] = true;
+  const auto file = [&](const char *label, const std::wstring &path) {
+    SetLastError(ERROR_SUCCESS);
+    Handle opened(CreateFileW(api(path).c_str(), GENERIC_READ | GENERIC_EXECUTE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    const auto error = opened ? ERROR_SUCCESS : GetLastError();
+    result[label] = {{"readExecuteAllowed", bool(opened)}, {"osError", error}};
+  };
+  file("bootstrapImage", image);
+  for (const auto name : {L"ntdll.dll", L"kernel32.dll", L"kernelbase.dll", L"advapi32.dll"})
+    file(utf8(name).c_str(), std::wstring(system.data()) + L"\\" + name);
+  SetLastError(ERROR_SUCCESS);
+  const auto station = OpenWindowStationW(stationName.c_str(), FALSE, WINSTA_READATTRIBUTES | WINSTA_ACCESSGLOBALATOMS);
+  const auto stationError = station ? ERROR_SUCCESS : GetLastError();
+  result["currentWindowStationMinimum"] = {{"allowed", station != nullptr}, {"osError", stationError}};
+  if (station) CloseWindowStation(station);
+  SetLastError(ERROR_SUCCESS);
+  const auto openedDesktop = OpenDesktopW(desktopName.c_str(), 0, FALSE,
+      DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS);
+  const auto desktopError = openedDesktop ? ERROR_SUCCESS : GetLastError();
+  result["ownedPrivateDesktopMinimum"] = {{"allowed", openedDesktop != nullptr}, {"osError", desktopError}};
+  if (openedDesktop) CloseDesktop(openedDesktop);
+  const bool restored = RevertToSelf() != FALSE;
+  revert.active = !restored;
+  need(restored, "BOOTSTRAP_LAB_REVERT_FAILED");
+  return result;
+}
 std::vector<wchar_t> clientEnvironment(const std::wstring &bootstrap, const std::wstring &base) {
   std::array<wchar_t, 32768> windows{};
   const auto count = GetWindowsDirectoryW(windows.data(), DWORD(windows.size()));
@@ -182,13 +222,16 @@ struct OwnedProcess {
   bool exited = false;
   ~OwnedProcess() { if (process && !exited) { TerminateProcess(process.value, 70); WaitForSingleObject(process.value, 5000); } }
 };
-Json runClient(const std::wstring &bootstrap, const std::wstring &destination, const std::wstring &base) {
+Json runClient(const std::wstring &bootstrap, const std::wstring &destination, const std::wstring &base,
+    bool loaderProbe = false, bool requestPrivateDesktop = true) {
   stage("root_acl");
   mediumOwnedDirectory(base);
   stage("restrict_client_token");
   auto token = restrictedClientToken();
   stage("private_desktop");
   auto desktop = privateDesktop();
+  stage("probe_client_access");
+  diagnostic.access = restrictedAccess(token.value, bootstrap, desktop);
   stage("client_environment");
   auto environment = clientEnvironment(bootstrap, base);
   stage("client_pipes");
@@ -211,7 +254,8 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   need(UpdateProcThreadAttribute(list.value, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
       const_cast<HANDLE *>(handles), sizeof(handles), nullptr, nullptr) != FALSE, "BOOTSTRAP_LAB_PROCESS_FAILED");
   STARTUPINFOEXW start{};
-  start.StartupInfo.cb = sizeof(start); start.StartupInfo.lpDesktop = desktop.fullName.data();
+  start.StartupInfo.cb = sizeof(start);
+  start.StartupInfo.lpDesktop = requestPrivateDesktop ? desktop.fullName.data() : nullptr;
   start.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
   start.StartupInfo.wShowWindow = SW_HIDE;
   start.StartupInfo.hStdInput = childInput.value;
@@ -243,7 +287,9 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   stage("resume_client");
   need(ResumeThread(child.thread.value) != DWORD(-1), "BOOTSTRAP_CLIENT_RESUME_FAILED");
   diagnostic.childResumed = true;
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+  // A fixed marker-only diagnostic has no network/install work; the original
+  // 180-second bootstrap deadline and outer 210-second test are unchanged.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(loaderProbe ? 10 : 180);
   std::string captured;
   const auto drain = [&] {
     for (;;) {
@@ -272,6 +318,14 @@ Json runClient(const std::wstring &bootstrap, const std::wstring &destination, c
   need(GetExitCodeProcess(child.process.value, &exit) != FALSE, "BOOTSTRAP_CLIENT_CAPTURE_FAILED");
   diagnostic.childExited = true;
   diagnostic.childExitCode = exit;
+  if (loaderProbe) {
+    static const std::string marker = "{\"schema\":\"gsw.bootstrap_loader_probe/1\",\"enteredMain\":true}\n";
+    const bool entered = exit == 0 && captured == marker;
+    stage("loader_control_observed");
+    return {{"scope", "diagnostic-control-not-installation-acceptance"}, {"enteredMain", entered},
+        {"childExitCode", exit}, {"capturedOutputBytes", captured.size()}, {"terminalToken", facts},
+        {"privateDesktopRequested", requestPrivateDesktop}, {"restrictedAccess", diagnostic.access}};
+  }
   stage("parse_child_response");
   const auto response = Json::parse(captured);
   if (response.is_object() && response.contains("code") && response["code"].is_string()) {
@@ -301,18 +355,25 @@ int wmain(int argc, wchar_t **argv) {
   Json result{{"schema", "gsw.bootstrap_terminal_run/1"}, {"ok", false}, {"testOnly", true},
       {"production", false}, {"authenticodeClaim", false}};
   std::wstring evidence;
+  std::wstring probe, probePin, destinationForProbe, baseForProbe;
   DWORD diagnosticOsError = ERROR_SUCCESS;
   try {
     stage("validate_lab_request");
     need(environment(L"GITHUB_ACTIONS") == L"true" && environment(L"RUNNER_OS") == L"Windows", "BOOTSTRAP_REMOTE_LAB_ONLY");
-    need(argc == 9, "BOOTSTRAP_LAB_INVALID_REQUEST");
+    need(argc == 9 || argc == 13, "BOOTSTRAP_LAB_INVALID_REQUEST");
     std::map<std::wstring, std::wstring> options;
     for (int i = 1; i < argc; i += 2) need(options.emplace(argv[i], argv[i + 1]).second, "BOOTSTRAP_LAB_INVALID_REQUEST");
-    need(options.size() == 4 && options.contains(L"--bootstrap") && options.contains(L"--destination") &&
+    need((options.size() == 4 || options.size() == 6) && options.contains(L"--bootstrap") && options.contains(L"--destination") &&
         options.contains(L"--expected-sha256") && options.contains(L"--evidence"), "BOOTSTRAP_LAB_INVALID_REQUEST");
+    if (options.size() == 6) {
+      need(options.contains(L"--loader-probe") && options.contains(L"--expected-probe-sha256"), "BOOTSTRAP_LAB_INVALID_REQUEST");
+      probe = localPath(options.at(L"--loader-probe")); probePin = options.at(L"--expected-probe-sha256");
+      need(std::filesystem::path(probe).filename() == L"GSW Bootstrap Loader Probe.exe", "BOOTSTRAP_LAB_INVALID_REQUEST");
+    }
     const auto bootstrap = localPath(options.at(L"--bootstrap"));
     const auto destination = localPath(options.at(L"--destination"));
     const auto base = localPath(wide(GSW_BOOTSTRAP_FIXTURE_ROOT));
+    destinationForProbe = destination; baseForProbe = base;
     evidence = localPath(options.at(L"--evidence"));
     need(beneath(base, destination) && beneath(std::filesystem::path(base).parent_path().wstring(), evidence), "BOOTSTRAP_LAB_PATH_INVALID");
     noLinks(destination); noLinks(evidence);
@@ -345,6 +406,33 @@ int wmain(int argc, wchar_t **argv) {
     diagnosticOsError = GetLastError(); result["code"] = "BOOTSTRAP_LAB_FAILED"; result["exceptionKind"] = "unknown_exception";
   }
   result["labDiagnostic"] = diagnostic.record(diagnosticOsError);
+  // Never turn these controls into a passing FIRST result or an installer
+  // fallback. Both controls retain the exact ordinary-client token assertions.
+  if (result["ok"] == false && diagnostic.childExited && diagnostic.childExitCode == 0xC0000142 && !probe.empty()) {
+    Json controls{{"scope", "diagnostic-only"}, {"installationAcceptance", false}, {"cases", Json::array()}};
+    try {
+      const auto pin = utf8(probePin);
+      need(pin.size() == 64 && pin.find_first_not_of("0123456789abcdef") == std::string::npos, "BOOTSTRAP_LAB_INVALID_REQUEST");
+      auto approved = approvedImage(probe);
+      need(approved.sha256 == pin, "BOOTSTRAP_SOURCE_IDENTITY_MISMATCH");
+      controls["probeSha256"] = approved.sha256;
+      for (const bool privateDesktopRequested : {true, false}) {
+        diagnostic = LabDiagnostic{};
+        try {
+          controls["cases"].push_back(runClient(probe, destinationForProbe, baseForProbe, true, privateDesktopRequested));
+        } catch (const Failure &error) {
+          controls["cases"].push_back({{"scope", "diagnostic-control-not-installation-acceptance"},
+              {"privateDesktopRequested", privateDesktopRequested}, {"code", error.code}, {"osError", error.systemCode},
+              {"stage", diagnostic.stage}});
+        } catch (...) {
+          controls["cases"].push_back({{"scope", "diagnostic-control-not-installation-acceptance"},
+              {"privateDesktopRequested", privateDesktopRequested}, {"code", "BOOTSTRAP_LOADER_CONTROL_FAILED"}, {"stage", diagnostic.stage}});
+        }
+      }
+    } catch (const Failure &error) { controls["code"] = error.code; controls["osError"] = error.systemCode; }
+      catch (...) { controls["code"] = "BOOTSTRAP_LOADER_CONTROL_FAILED"; }
+    result["loaderDiagnostic"] = controls;
+  }
   if (!evidence.empty()) {
     try { receipt(evidence, result); } catch (...) { result["ok"] = false; result["code"] = "BOOTSTRAP_LAB_EVIDENCE_FAILED"; }
   }

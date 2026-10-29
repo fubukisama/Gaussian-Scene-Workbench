@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--harness", type=Path, required=True)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--loader-probe", type=Path)
     args = parser.parse_args()
     if os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "Windows":
         parser.error("remote_windows_lab_only")
@@ -45,10 +46,14 @@ def main() -> int:
         "sourceCommit": os.environ.get("GITHUB_SHA"), "runId": os.environ.get("GITHUB_RUN_ID"),
         "runAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"), "bootstrapSha256": pinned,
         "authenticodeClaim": False, "production": False, "privateKeyCreated": False})
-    result = subprocess.run([str(args.harness.absolute()), "--bootstrap", str(args.bootstrap.absolute()),
+    command = [str(args.harness.absolute()), "--bootstrap", str(args.bootstrap.absolute()),
         "--destination", str(destination), "--expected-sha256", pinned,
-        "--evidence", str(args.evidence.absolute() / "terminal-native.json")], capture_output=True,
-        timeout=210, creationflags=subprocess.CREATE_NO_WINDOW)
+        "--evidence", str(args.evidence.absolute() / "terminal-native.json")]
+    if args.loader_probe:
+        with args.loader_probe.open("rb") as image:
+            probe_pin = hashlib.file_digest(image, "sha256").hexdigest()
+        command.extend(["--loader-probe", str(args.loader_probe.absolute()), "--expected-probe-sha256", probe_pin])
+    result = subprocess.run(command, capture_output=True, timeout=210, creationflags=subprocess.CREATE_NO_WINDOW)
     native = json.loads(result.stdout)
     write_json(args.evidence / "first-install-tracer.json", {"schema": "gsw.bootstrap_first_install_tracer/1",
         "testOnly": True, "production": False, "harnessExitCode": result.returncode, "harness": native,
