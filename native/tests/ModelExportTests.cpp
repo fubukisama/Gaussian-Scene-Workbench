@@ -1170,6 +1170,8 @@ void ModelExportTests::exportsCompleteMeshAndEmbeddedGlb() {
       QCOMPARE(uintAt(bytes, 0), 0x46546C67U); QCOMPARE(uintAt(bytes, 4), 2);
       QCOMPARE(uintAt(bytes, 8), bytes.size());
       const auto json = QJsonDocument::fromJson(bytes.mid(20, uintAt(bytes, 12))).object();
+      QCOMPARE(json["asset"].toObject()["generator"].toString(),
+               QStringLiteral("Gaussian Splatting Workbench"));
       const auto primitive = json["meshes"].toArray()[0].toObject()["primitives"].toArray()[0].toObject();
       QCOMPARE(primitive["mode"].toInt(), 4);
       const int positionIndex = primitive["attributes"].toObject()["POSITION"].toInt();
@@ -1200,6 +1202,8 @@ void ModelExportTests::exportsPointGlbWithoutInventingFaces() {
   const auto result = exportModelFile(o); QVERIFY2(result.success, qPrintable(result.error));
   const auto bytes = read(o.destinationPath);
   const auto json = QJsonDocument::fromJson(bytes.mid(20, uintAt(bytes, 12))).object();
+  QCOMPARE(json["asset"].toObject()["generator"].toString(),
+           QStringLiteral("Gaussian Splatting Workbench"));
   QCOMPARE(json["accessors"].toArray()[0].toObject()["count"].toInt(), 3);
   const auto primitive = json["meshes"].toArray()[0].toObject()["primitives"].toArray()[0].toObject();
   QCOMPARE(primitive["mode"].toInt(), 0); QVERIFY(!primitive.contains("indices"));

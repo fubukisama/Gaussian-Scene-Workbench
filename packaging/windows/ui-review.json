@@ -7,12 +7,12 @@
     "en_US",
     "ja_JP"
   ],
-  "definitionSha256": "e47a867da121246ac78d21a370df65bff51e273f180b10de9eec7207cd17611a",
-  "messagesSha256": "5143abbc862625b8e77f072b0b2d4999fe9ca3cb9b8914638160d65cff5091f7",
-  "evidenceRun": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/38715334245",
-  "evidenceHead": "b430d4a7e68010a6c0e6e417a6bc8bb7f4e6baab",
+  "definitionSha256": "10210dfb03ef91627005ccbdb2d053660874deb6b5346d7c963b2cc1e621998f",
+  "messagesSha256": "9190f68b17753bc4cbed6f81d27800f540be64f03a150f8c8ad287556cb01116",
+  "evidenceRun": "https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801340542",
+  "evidenceHead": "b0aacf85bb5e87b82b6bfcde0ce0a6ba5728b93b",
   "reviewer": "Codex visual inspection",
-  "reviewedDate": "2026-10-15",
+  "reviewedDate": "2026-10-29",
   "reviewedScreens": {
     "zh_CN": [
       "welcome",
@@ -47,28 +47,28 @@
     },
     {
       "file": "en_US-directory.png",
-      "bytes": 18847,
-      "sha256": "0450c6a69a1678f3ee183980b97f8180b823e5ef20326c30182b0836ef4532a3"
+      "bytes": 19038,
+      "sha256": "75d1ebc9be73bde730c0111899a52b0eea8f97fa64e99bd9ddc45bffc1fae242"
     },
     {
       "file": "en_US-license.png",
-      "bytes": 26118,
-      "sha256": "04b9772ac6f83cdf1a826bbb578355363dd09a26999e427d56e927cf5cc9aad7"
+      "bytes": 26248,
+      "sha256": "674f8689f47ce29d5c67346ab7db567e31d0cbeadaa657313425830e88397861"
     },
     {
       "file": "en_US-runtime-back.png",
-      "bytes": 22248,
-      "sha256": "5b59f333ae59c617777a6ce574a965f9e8f73de3504253116f8ad6961f44e22e"
+      "bytes": 22378,
+      "sha256": "d033d6b9316933e7677017648e9b7bbe1cbc30be972a2204d38172c0f475fcb1"
     },
     {
       "file": "en_US-runtime.png",
-      "bytes": 22248,
-      "sha256": "5b59f333ae59c617777a6ce574a965f9e8f73de3504253116f8ad6961f44e22e"
+      "bytes": 22378,
+      "sha256": "d033d6b9316933e7677017648e9b7bbe1cbc30be972a2204d38172c0f475fcb1"
     },
     {
       "file": "en_US-welcome.png",
-      "bytes": 27325,
-      "sha256": "8f15ec64126d03d565d48ad94500f603c61d4b1074f7049824a7ea6eb55b5760"
+      "bytes": 27824,
+      "sha256": "9e8e08562322431f2900d8bb5bb1f1ac5fbe119f8ad97cdd9ea6f4b31f7f1de2"
     },
     {
       "file": "ja_JP-cancel-confirmation.png",
@@ -77,28 +77,28 @@
     },
     {
       "file": "ja_JP-directory.png",
-      "bytes": 19284,
-      "sha256": "9ca9ee2332041bbfd8638ae53814802ed95b797a2c69c5dc2a69d1f2b5bd5abb"
+      "bytes": 19603,
+      "sha256": "878d81471a8f6c8fdfd59f845946ae87bb06da34362c7e26805a7aeab2102c13"
     },
     {
       "file": "ja_JP-license.png",
-      "bytes": 26718,
-      "sha256": "f4e4c9d11f59c97435482dc715b33a004d81533342cfa340cb96a9c7f4f350ab"
+      "bytes": 26854,
+      "sha256": "7bd4f3d062d4b2fdb7e95d69efc5e2aba51c24aad34c704098d7ec5108cd9286"
     },
     {
       "file": "ja_JP-runtime-back.png",
-      "bytes": 20215,
-      "sha256": "464dcc8157219562121b90a9eeaa468f70e6871eee82d299e819b4cd2161f28e"
+      "bytes": 20366,
+      "sha256": "0f01df2c508de2c0286f28f24294839489995879637578c4681047f04cde1aa5"
     },
     {
       "file": "ja_JP-runtime.png",
-      "bytes": 20215,
-      "sha256": "464dcc8157219562121b90a9eeaa468f70e6871eee82d299e819b4cd2161f28e"
+      "bytes": 20366,
+      "sha256": "0f01df2c508de2c0286f28f24294839489995879637578c4681047f04cde1aa5"
     },
     {
       "file": "ja_JP-welcome.png",
-      "bytes": 27226,
-      "sha256": "ed6368e228f8fd5f2d17be344b2ff4e17e2524d8c2c5b2d3ba6f351b629d3a12"
+      "bytes": 27754,
+      "sha256": "1f60d9420c6c0da9485dfc4a9865222d020c0495aaae31c1b3da4caf9f1e3d65"
     },
     {
       "file": "zh_CN-cancel-confirmation.png",
@@ -107,33 +107,33 @@
     },
     {
       "file": "zh_CN-directory.png",
-      "bytes": 18980,
-      "sha256": "e0c508c5063cf5f55ceae59ca95632e1adab412e8e92cdb3a1e4392d1291865d"
+      "bytes": 19295,
+      "sha256": "05618febee5910bf5c6566c9f9364edfad16fa590afa56d0905981cac8b164a9"
     },
     {
       "file": "zh_CN-license.png",
-      "bytes": 27405,
-      "sha256": "7b03bb65570df698eb4ff9625415e4e2aeda137cffc7e7984c88bbff69eb457b"
+      "bytes": 27539,
+      "sha256": "c6b6c9a21cee36bac591500b5715b0d7e407674bbbaac03fde94ff4caec9687a"
     },
     {
       "file": "zh_CN-runtime-back.png",
-      "bytes": 20946,
-      "sha256": "bd0263e321a350c63911ce238335d0081570da2f5dcea8ac7b8f60f0846f494c"
+      "bytes": 21091,
+      "sha256": "e08b2535edb0d10d6bb5154a052fb6735de61706acddb80628b0c168734d2ceb"
     },
     {
       "file": "zh_CN-runtime.png",
-      "bytes": 20946,
-      "sha256": "bd0263e321a350c63911ce238335d0081570da2f5dcea8ac7b8f60f0846f494c"
+      "bytes": 21091,
+      "sha256": "e08b2535edb0d10d6bb5154a052fb6735de61706acddb80628b0c168734d2ceb"
     },
     {
       "file": "zh_CN-welcome.png",
-      "bytes": 27237,
-      "sha256": "814f4bfa5bd90a55dda0c49ccba6ef3e1afc9e06297a134985b6cb3b4bf2183e"
+      "bytes": 27746,
+      "sha256": "cfd38476651919ad7d296b3f67eedd1a7b4833c048c7eeabe10391946fa5e7ea"
     }
   ],
   "notes": [
-    "All 18 real window captures reviewed individually: captions complete, controls visible, no clipping or overlap found within these six pages per language.",
-    "Long destination paths scroll horizontally as expected. Native Yes/No button captions follow the Windows runner language; dialog text follows the selected installer language.",
-    "This is installer-only fixture visual acceptance, not native application or complete native-package acceptance. External font metrics remain diagnostic-only."
+    "All 18 real Windows installer-only fixture captures were opened and inspected individually: the Gaussian Splatting Workbench title is complete, controls are visible, and no clipped or overlapping captions were observed within these six pages per language.",
+    "Welcome headings use native wrapping, including character-level wrapping in Japanese. Long destination paths scroll horizontally as expected. Native Yes/No captions follow the runner's Windows language; dialog text follows the chosen installer language.",
+    "The exact definition/messages hashes and evidence head bind this branding review. This is installer-only visual acceptance, not native application, training, complete-package or local-delivery acceptance. The original automatic caption report remains manual-required and is not rewritten."
   ]
 }

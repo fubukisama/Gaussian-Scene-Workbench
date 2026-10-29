@@ -57,7 +57,7 @@ $existing = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
     [string]::Equals($_.ProcessName, 'Gaussian Scene Workbench', [System.StringComparison]::OrdinalIgnoreCase)
 })
 if ($existing.Count -gt 0) {
-    throw ('Save your project and manually close all Gaussian Scene Workbench windows before launching diagnostics. Existing process IDs: ' + (($existing | Select-Object -ExpandProperty Id) -join ', '))
+    throw ('Save your project and manually close all Gaussian Splatting Workbench windows before launching diagnostics. Existing process IDs: ' + (($existing | Select-Object -ExpandProperty Id) -join ', '))
 }
 
 $captureRoot = [System.IO.Path]::GetPathRoot($capture)
