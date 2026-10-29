@@ -1,216 +1,215 @@
-# UI Upgrade — 2026-10-29 最新验收草稿
+# UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **ARTIFACT_REVIEW_FOUND_FAILURES / REPAIR_IMPLEMENTED_REMOTE_NOT_RUN / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **FORMS_REPAIR_SUBGATE_PASS / AC5_FULL_CI_FAIL / LATER_SOURCE_CI_RUNNING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
-## 0. 最新原图与下载回读发现（优先于下文待导入文字）
+这不是发布许可或“全面升级完成”报告。`ACCEPTANCE_STATUS.md/.json` 继续作为旧
+`ffb8eb2` 快照保留；更早的失败、原始结果及本文前版均保存在证据目录和 Git 历史中。
+下文按源码、视觉、交互、性能、包文件、完整云端及本地交付分开判定，不跨源码继承绿灯。
+状态是 Root 最近直接日志／artifact 审阅的交接快照，不代表尚在运行的 job 已完成。
 
-2026-10-29 已取得完整 Forms ZIP：165537903 bytes，SHA256
-`9d4b82ca440acd388fb050d423ad19771c4f1a940a453aff3f1b355e1e294d31`。
-解压至 `D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40743097537/`。
-真实结果为34/34选定CTest通过、32报告全部finished且无到限、661 native captures、
-1681 raw PNG、16类对话框192格完整，300条profile均保留公开参数快照。
-40732条字体证据均17 glyph / 0 missing；实际字体含Segoe UI、Yu Gothic UI、
-Microsoft YaHei UI及Cascadia Mono，混排glyph-run还记录MS UI Gothic。
-这不等于全量文字截切或视觉通过。
+## 1. 候选与实际执行边界
 
-正常尺寸审阅16类的英文/浅色/窄窗代表图，并补看相关暗色图，发现：
+| 身份 | 已确认值与范围 |
+|---|---|
+| 当前已完成表单修复验收的提交 | `ac5c77b4ab22d5ec3de444e41bb723e1cba68c4f` |
+| 该提交 tree | `74c8a6f5ee0bc941716b905bd61a19edb8e29995` |
+| 观察到的后续品牌整合提交 | `9803c8622b47313e2194ac900037b549dfc5bdab`；它有独立运行，不能把 ac5 / a539 的结果改名继承。 |
+| 历史完整云端成功候选 | `a5393be3772b8d49c6be93a767dc7dfd5abcec5a`，tree `f8c4b88f4c30976bef7d705802a808f35112d37d`；后续原图和下载回读发现缺陷，因此历史云端绿灯不等于完整接受。 |
+| 本地执行边界 | 仅静态验证、编译链接、文件／hash／包检查和远端证据读取；没有运行本地自动测试、应用、GUI 或安装器。 |
+| 用户状态 | 没有改动活动安装、`current.json`、快捷方式、原始照片／模型、工程、检查点或运行会话；没有开始或恢复真实训练。活动指针仍为旧 `87a797b` 版本。 |
 
-- **初始化输入框横向裁切**：`standalone-surfaces/process-2288-58e03d3d59fd44f6afc6c11898ecb526/surface-0004.png`。
-  560×620时左右split仍横排，左参数窗约193px，输入框在可视区右边；内外双重滚动使横向滚条也不在初始画面。
-  修复采用窄窗上下排列及整行字段，外层统一纵向滚动，不缩字体或隐藏参数。
-- **批量训练按钮裁字**：`forms-core/surfaces/process-7944-525200a4ce9b426b950d3a7822561b8d/surface-0006.png`。
-  680×620时动作横排把完整英文caption左右截去；两组动作改为按原sizeHint自动换行。
-- **暗色表格白角**：同process的`surface-0012.png`及初始化`surface-0010.png`。
-  `QTableCornerButton::section`漏出原生白色；共用表头背景、边界样式已补。
-  [Qt官方6.8样式说明](https://doc.qt.io/qt-6.8/stylesheet-reference.html#qtableview-widget)确认该独立section须显式设置背景与边界。
+早期像素、导航及计时分别保留自己的 `de764f0` / 基线身份。共同实现或源码连续性可以
+作为影响分析，但不能把旧截图、EXE 或计时重新标成 ac5 / 980 的新测量。
 
-三处修复保留原三语言文字、请求/报告、按钮连接、worker和所有原断言；新加真实字段横向可用、
-按钮完整sizeHint/窗口内/无重叠，以及表格角实际像素回归。它们目前只有编译与静态验证，**远端修复验收NOT_RUN**。
+## 2. 当前与历史云端：分别记录
 
-### 包下载回读缺陷
+| 运行／job | 源码 | 已观察结果 | 严格边界 |
+|---|---|---|---|
+| [Forms 40800828340](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40800828340) | `ac5c77b` | **最终 SUCCESS**；34 个选定 CTests PASS；16 类表单192格完整、0 missing；300 条 matrix profile 均 native / captured / layoutUsable / publicSnapshot=true。 | 是表单修复子门及证据合同通过，不是所有 popup、全部状态、无障碍或全192格人工视觉通过。 |
+| [Native Windows 40800786447](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40800786447) — Qt job `123208136906` | `ac5c77b` | **FAIL**：4 个 graphics-bootstrap 中3个 PASS，`native_infinite_reference_grid` 在 **15.06s TIMEOUT**，没有测试输出。 | 失败发生在进入完整 Test 前；不能写成该提交175 CTests或新产品包已通过。原因未知，详见第5节。 |
+| 同一 run — upstream viewport | `ac5c77b` | **SUCCESS**。 | 独立子 job 的成功不消除 Qt bootstrap 失败。 |
+| 同一 run — CodeQL | `ac5c77b` | 最近交接时仍 **RUNNING**。 | 不能从旧成功推定其已完成。 |
+| [Native Windows 40801832785](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801832785) | `9803c86` | 最近交接时 **RUNNING**；已通过 graphics-bootstrap，进入完整 Test。 | 是自然的新 source 运行，不是旧 ac5 失败重分类；完整结果、包和其余 jobs 仍待完成。 |
+| [历史 Forms 40743097537](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743097537) | `a5393be` | SUCCESS；34/34选定 CTests、16类192格完整。 | 正常尺寸原图后来发现3类真实缺陷；不能以 capture 完整宣称视觉通过。 |
+| [历史完整 Native Windows 40743102181](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743102181) | `a5393be` | 当时3 jobs SUCCESS；直接日志为4 bootstrap、175 CTests、upstream 65+6及 CodeQL 通过。 | 随后便携 artifact 下载回读发现隐藏文件被过滤，不能由 staging 绿灯替代实际分发包。 |
 
-完整便携artifact ZIP：123645273 bytes，SHA256
+## 3. 三处表单问题：修复与实际复验
+
+旧 a539 正常尺寸原图发现：
+
+1. 初始化窗口560×620时左右 split 仍横排，左侧字段过窄并出现横向裁切。
+2. 批量训练680×620时按钮横排，长英文 caption 被裁切。
+3. 暗色表格左上角 `QTableCornerButton::section` 漏出原生白色。
+
+修复保留请求、worker、参数、三语文字及原断言：初始化窄窗改上下排列、字段占整行、
+外层统一纵向滚动；批量动作依原 sizeHint 自动换行；table corner 使用共用表头背景
+和边界。新断言检查真实字段横向可用、按钮完整尺寸／窗口内／无重叠及角落实际像素。
+没有缩小字体、隐藏功能、改动训练参数或放宽 timeout。
+
+### 3.1 ac5 修复 artifact 身份
+
+目录：`D:/Codex/validation/gsw-ui-upgrade-20261028/forms-run40800828340/`。
+
+| 文件／结果 | 身份 |
+|---|---|
+| ZIP | 165660082 bytes；SHA256 `b06e6a601e9aff6cd008caac8f6933ae050e927d15d447b68fcfe8c88357676f` |
+| 此 Forms QA 构建 EXE | SHA256 `40f3c4aaf5d9d7641be9e5ababa4da43e7cee7198c4e3dfb66066205de44cd6e`；不是已交付产品包。 |
+| `surface-results.json` | SHA256 `36958147f7df747598d2b942c6ffb5619590652c45578a1e7f30919d3fa36d72` |
+| 行为和覆盖 | 34 个选定 CTests PASS；16 classes / 192 minimum cells complete / 0 missing；300 matrix profiles 的 native、captured、layoutUsable、publicSnapshot 全 true。 |
+| AppTheme | **44 PASS**；table-corner 检查内部6次迭代，不把它误记为6个 QTest 数据行。 |
+
+### 3.2 正常尺寸视觉复查范围
+
+Root 与 agent 共看5张修复后原始 PNG，确认上述3类已知缺陷在这些代表图中关闭。
+Root 直接审阅的精确路径（相对于上方 artifact 目录）：
+
+- `standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0004.png`：初始化，英文／浅色／窄窗。
+- `forms-core/surfaces/process-6348-fbcfb2bd2029492095acc6199f2c7258/surface-0006.png`：批量训练，英文／浅色／窄窗。
+- `standalone-surfaces/process-7840-50e0cad87ae14d9483647e976763f3ce/surface-0011.png`：初始化，日文／暗色／标准窗，包含 table corner。
+
+agent 另看初始化及批量训练各一张日文／暗色／窄窗；此处不伪造未逐条转录的精确
+观看路径。它们的角色／语言／主题／宽度记录可由 artifact 元数据独立回查。
+
+历史 a539 人工复查共32张代表图：16类各一张英文／浅色／窄窗，加16张日文／暗色
+（8窄、8标准），据此发现上述问题。**不是全192格人工视觉签收**，也不将旧图当作
+修复后画面。普通列截断、路径省略和可用滚动未误判为缺陷。原图、旧失败和 hash 保留。
+
+## 4. 分发包隐藏文件：旧失败、fixture通过、新真包未验
+
+旧 a539 便携 artifact ZIP 为123645273 bytes，SHA256
 `6aa7e1e92ce2de6ee4a93a07da1be86e21c908964c259c0dbbf6de5fcbd2025c`。
-远端staging验证曾PASS，但ZIP中央目录2996entries、dotfile entries=0；本地静态
-`verify_native_backend.py --package`实际FAIL，缺11个`.gitignore/.gitmodules/.gitkeep/.appveyor.yml/.travis.yml`路径。
-对应source下隐藏源码元数据同样受过滤。这不是本地Expand-Archive漏解压，不是程序已经通过包回读。
-修复上传受控payload的`include-hidden-files: true`，新增真实Actions upload→download→manifest/byte回读门；
-`.git`仓库元数据仍禁止进入包。旧artifact不被重建后冒充原包通过。
+中央目录2996 entries、dotfile entries=0；本地仅静态执行 package validator 实际
+**FAIL**，缺11个 `.gitignore/.gitmodules/.gitkeep/.appveyor.yml/.travis.yml` 路径。
+这不是 `Expand-Archive` 漏解压；远端 staging PASS 不代表上传后包完整。
 
-Setup本体已单独核对：113631173 bytes，SHA256
-`47c0b7cf4ba841dc7c71ef37dcbde33eb026f997823091993350318acf46dc3d`，
-manifest指向EXE `e33c28987d793b91c66e1e061297820b11941cc4fa98e7d1a82802d11e309dba`。
-Setup为NotSigned，不捆绑训练环境、不自动打开程序。三语言向导代表图已正常尺寸审阅；
-独立test-AppId安装/重装/卸载/锁定升级拒绝/用户数据保留记录通过，但不等于本机已安装。
-精确a539 Git源码归档SHA256为`55e7edded5651326d31ff6e79087a78b4463018e984edb8a945d403bafddb41d`；
-它是另存的源码快照，不用于掩盖便携artifact漏文件。
+上传修复明确使用 `include-hidden-files: true`，`.git` 仓库元数据仍禁止打包。
+新增实际 upload → download → manifest / byte 回读门，不修写旧 artifact 为 PASS。
 
-这是一份增量证据台账，不是发布许可。旧的
-`ACCEPTANCE_STATUS.md/.json` 保留为 `ffb8eb2` 历史快照；其中实际发生的失败、
-原始结果和当时的未运行项不被本文件覆盖。本文把源码实现、视觉、交互、性能、
-完整云端、包文件和本地交付分别判定，不宣称“全面升级完成”。
+独立 [40801079598](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801079598)、
+源码 `b909f71` 的小 fixture **PASS**：5项公共 CLI 合同；旧过滤负对照准确拒绝缺失
+`.gitignore`；正对照10文件／5隐藏文件／4 backend records／3 source records 与 staging
+一致，`applicationExecuted=false`。正对照 receipt SHA256
+`dfc26398d0f1b5dc18d93c796304c8844ddae6c06326545af75aacda559707a4`；负对照
+`16f15135404663fa99f0724861b985bef5fd67c7fcc5824e505f19933de5a6c6`。
+首次 fixture run40800786401的 harness 对预期非零退出处理失败也保留；只修 harness，
+不放宽 validator。
 
-## 1. 源码与运行身份
+**该 PASS 仅限 fixture。** ac5 完整 Qt job 在 bootstrap 失败，新的完整真实产品包
+upload / download / manifest 回读为 **NOT_RUN**。980 的完整运行仍在进行，未据此接受包。
 
-| 身份 | 已确认值与边界 |
-|---|---|
-| 本轮完整远端候选 | `a5393be3772b8d49c6be93a767dc7dfd5abcec5a` |
-| 本轮候选 Git tree | `f8c4b88f4c30976bef7d705802a808f35112d37d` |
-| 观察到的后续 main | `82e71320a3604eedc0f804cefc050a446f502e30` |
-| 后续 main Git tree | `11dbe6c93ed826706f7b1704083583d5b5bffdb0` |
-| 后续差异范围 | Root 已核对为三个 updater-only 提交；与已测候选相比，MainWindow、AppTheme、NativeViewport、Initialization 和 CMake 无共享 UI 差异。这不是后续提交完整 CI 或新二进制已通过的声明。 |
-| 新版包身份 | `0.3.9-native-preview` Setup 已下载且 SHA256 匹配；便携 artifact 已完整下载但发现隐藏文件被上传过滤，静态验证 FAIL。详见第 9 节。 |
-| 本地执行边界 | 本轮仅静态验证、编译链接、文件检查及已下载远端证据读取；没有运行本地自动测试、应用、GUI 或安装器。 |
-| 用户状态 | 未改变活动安装、`current.json`、快捷方式、工程、照片、模型、检查点或运行中的会话；没有开始或恢复真实训练。 |
+历史 a539 Setup 曾独立静态核对：113631173 bytes，SHA256
+`47c0b7cf4ba841dc7c71ef37dcbde33eb026f997823091993350318acf46dc3d`，manifest EXE SHA256
+`e33c28987d793b91c66e1e061297820b11941cc4fa98e7d1a82802d11e309dba`。
+它为 NotSigned，不捆绑训练环境、不自动开程序；三语言向导代表图已正常尺寸审阅，
+远端独立 test-AppId 安装／重装／卸载／锁定升级拒绝／用户数据保留通过。该历史 Setup
+不替代 ac5 / 980 新包，不等于本机已经安装。另存 a539 Git 源码归档 SHA256
+`55e7edded5651326d31ff6e79087a78b4463018e984edb8a945d403bafddb41d`，不用于掩盖便携包漏文件。
 
-此前修复后的像素及导航短门绑定的是
-`de764f0a5ef3a8e813ec38ed19e3f232e4c83fbe`，不把该提交的截图或计时直接
-改写成 `a5393be` / `82e7132` 的新测量。可引用共同实现及源码连续性，但证据仍保留
-自己的 source / tree / run 身份。
+## 5. 新 bootstrap 超时：原因未知，不能猜测关闭
 
-## 2. 新近完成的云端结果
+ac5 的 `native_infinite_reference_grid` 在15.06s TIMEOUT，没有测试输出。其余3个
+bootstrap PASS。对应 grid / main / viewport 源码未改动，但这既不证明基础设施故障，
+也不证明产品回归；**当前原因未知**，不猜测回退，不删除断言或延长15s timeout。
 
-下列结果由 Root 直接读取 Actions 状态及日志确认；artifact 的逐文件审阅尚未全部导入。
+已保留直接失败日志
+`D:/Codex/validation/gsw-ui-upgrade-20261028/full-run40800786447-native-failure.log`
+及 tiny grid-timeout artifact，解压目录为
+`D:/Codex/validation/gsw-ui-upgrade-20261028/grid-timeout-run40800786447/`。
+原临时路径在 C:、上传查找目录在 runner 的 D:，因此缺少 snapshot **不能推断程序
+停在哪个阶段**。不能从“没有图”推导未 show、GL 失败或缓存死锁。
 
-| 远端运行 | 源码 | 已完成结果 | 不可外推的范围 |
+单次失败二进制 replay 的诊断 workflow / script 已准备，最近交接时**尚未 dispatch**：
+只复用失败二进制、一个进程、原15s deadline、fresh TMP trace；它是诊断，不是性能
+复测或接受凭证。后续980自然运行通过 bootstrap 是新 source 的反例观察，不将 ac5
+原失败改成 PASS。所有后续结果仍需独立保留 source / EXE / environment 身份。
+
+## 6. 性能结果保持不变
+
+`D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40663280091/results.json`
+的原始整体状态仍是 **FAIL**：轻模型的 `3dgs/model` 跨进程累计 upload counters
+绝对值比较产生身份合同失败。新 checker 比较语义模型及操作内零 deltas，仍保留
+绝对计数；**相同24份不可变 receipts 的新远端复核尚未取得接受结果**，源码修复
+不是测量通过。不为这个 checker 修复重跑计时实验。
+
+中模型 `present_p50_ms`、`response_p50_ms`、`present_max_ms`、`response_max_ms`
+四项仍为 **INCONCLUSIVE**：A 臂波动超过冻结噪声预算。各 pair 落在差值限制内也不能
+消除噪声。不放宽预算、不重复刷绿、不重写原图／计时；INCONCLUSIVE 不是已证明变慢，
+也不是已证明无退化。
+
+实际 GPU 毫秒、driver VRAM residency、physical input-to-photon、暗色性能、用户
+NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / requested GPU bytes 不是
+驱动显存驻留。冻结计划、阈值、重复单位、画质和 timeout 不变。
+
+## 7. 29 项范围化矩阵
+
+状态只用原合同五类；`NOT_RUN` 也表示聚合门槛尚无完整可接受结论。子门的 PASS、
+历史 FAIL 和测量 INCONCLUSIVE 单列保留，不提供误导性的“29项全通过”计数。
+
+| ID | 状态 | 已取得的范围化证据 | 仍开放的 gate / 限制 |
 |---|---|---|---|
-| [Forms 40743097537](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743097537) | `a5393be` | Actions **SUCCESS**；真实 Windows 窗体／样式通道完成。 | 16 类表单矩阵、原图、hash、实际字体及参数快照的 artifact 审阅仍为 **PENDING_FORMS_ARTIFACT_REVIEW**。不得先填写 16/16 视觉通过。 |
-| [Native Windows 40743102181](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743102181) — Qt 6 native preview | `a5393be` | **SUCCESS**；直接日志显示 4 个 graphics-bootstrap 检查及 175 个 CTests 通过；安装器三语言检查通过。 | 安装器 caption / 原始 PNG 正常尺寸审阅、包下载与静态身份绑定尚待完成；CI 成功不等于本机已更新。 |
-| 同一 run — Upstream viewport acceptance | `a5393be` | **SUCCESS**；直接日志显示 65 + 6 项验收通过。 | 不包含用户 NVIDIA 驱动、真实跨屏或用户工程的验收。 |
-| 同一 run — Native C++ CodeQL | `a5393be` | **SUCCESS**。 | 不是所有类别安全审计或后续 `82e7132` 全检查的证明。 |
+| BASE-01 | PASS | 起始身份、并行修改保护以及 ac5 source / tree 绑定保留。 | 后续提交／每个包单独绑定；不跨源码继承。 |
+| AUDIT-01 | NOT_RUN | 66表面、16 Dialog、147 popup 静态登记；16类表单最低证据矩阵完成。 | 全部可达表面、状态和视觉逐项签收未闭环；新增 updater 是独立增量表面。 |
+| DPI-01 | NOT_RUN | de764 五档受控 Qt DPR 及逻辑／物理映射有实测；表单 profiles 有实际 native 几何。 | OS 原生五档缩放／真实跨屏未测；Qt scale factor 不替代。 |
+| NAV-01 | NOT_RUN | de764 中文20 cases / 60 rings 冻结像素子门 PASS，部分正常尺寸原图已审阅。 | 全部受影响姿态／状态视觉未闭环；旧图不重标为 ac5 / 980。 |
+| NAV-02 | PASS | 修复后 de764 三语真实输入短门通过；ac5 独立 upstream viewport job SUCCESS。 | 限受控 Windows / software-GL 的具体行为，不是全产品或用户 NVIDIA。 |
+| NAV-03 | NOT_RUN | de764 的20次 theme / resize / language 生命周期通过。 | 真实跨屏及其拾取／缓存一致性仍未测。 |
+| THEME-01 | UNSUPPORTED | 白／暗场景背景和浅／深主题保持；未用 Blender 灰掩盖缺陷。 | 任意用户 RGB / alpha 背景缺可达配置能力，不计通过。 |
+| FONT-01 | NOT_RUN | 安全字体证据30数据行通过；表单 glyph / font facts 有真实记录。 | 自绘轴、caption、图表、预览等角色及全量文字／基线视觉不可由 QWidget 默认 probe 代替。 |
+| ICON-01 | NOT_RUN | 公共样式／icon 合同和 ac5 Forms 运行通过，五DPR／三语原图存在。 | 全图标状态正常尺寸视觉签收未闭环。 |
+| SHELL-01 | NOT_RUN | tokens、透明标签、inspector wrap、小屏有效最小尺寸及 ac5 表单修复已实现。 | 宽窄窗关键动作／溢出／dock／任务／状态等逐表面签收未齐。 |
+| TREE-01 | NOT_RUN | 历史完整回归保留选择／眼睛／滚动／分隔合同。 | 当前 source 的具体行为与图像逐项映射尚未齐；不能只引用旧总绿灯。 |
+| GIZMO-01 | NOT_RUN | de764 四模式30 cases / 156 PNG；有界 native-DPR coverage。 | 中文／暗色／DPR1及两姿态范围以外不外推；多距离视觉仍未全签；超预算 close-up 有原向量回退。 |
+| GIZMO-02 | NOT_RUN | de764 鼠标 X16 / Y8及6个数值 Z用例通过。 | 不虚称全部鼠标 Z、中心／平面约束、取消／撤销组合均实测。 |
+| MODEL-01 | NOT_RUN | 历史多对象合同保留，真实 fixture / transform 身份有记录。 | 当前原／非当前、全隐藏恢复、相机／单位／源文件的完整具体签收仍开放。 |
+| MODEL-02 | NOT_RUN | 受控 renderer / 点数 / SH / TRS / fixture receipts 保留。 | 点云、网格、3DGS、2DGS、任务预览的完整画面／选择／导航不可由模式标签或计时 receipt 代替。 |
+| OVERLAY-01 | NOT_RUN | 选择／刷选／裁剪／提示入口和合同登记保留。 | 多尺度／视角／状态原图及数据保护未逐项闭环。 |
+| GRID-01 | FAIL | 历史三语 presentation PASS；ac5 bootstrap `native_infinite_reference_grid` 15.06s TIMEOUT。 | 无输出、原因未知；单次失败二进制诊断尚未完成，不能延时／删断言关闭。980 新运行的 bootstrap PASS 不改写旧失败。 |
+| FPS-01 | NOT_RUN | 新帧 serial / swap / metrics 和有效空闲原始时窗存在，未增加持续重绘 timer。 | 聚合计时未接受，不以局部0计数或耗时倒数冒充完整 FPS 验收。 |
+| FORM-01 | NOT_RUN | **修复子门 PASS**：ac5 34 CTests、300 profiles、16类192格0缺项；5张新图关闭3类已知缺陷。 | 全部 popup／特殊状态／provider／嵌套提示／无障碍和全量视觉不是该子门覆盖；不宣称全192格人工审阅。 |
+| STATE-01 | NOT_RUN | 受控 task / worker / forms 旧合同及本轮公开 snapshot 保护保留。 | 空／加载／忙／失败／取消／重试／不支持的全表面具体证据仍未齐。 |
+| LOCALE-01 | NOT_RUN | 三语 catalog、安全字体、修复后导航以及 ac5 表单矩阵通过；公开参数不变。 | 全表面即时切换、长文本／混合文件名和 worker／模型状态保护仍有范围缺口。 |
+| A11Y-01 | NOT_RUN | focus inset、geometry、语义 icon 合同及按钮完整可用尺寸通过。 | 全表面 Tab / shortcut / tooltip / accessible name / disabled reason 仍未齐。 |
+| LIFE-01 | NOT_RUN | de764 UI cache 生命周期 PASS，持久队列／取消合同未删除。 | 当前窗口／任务重连和 MainWindow 嵌套完整续训 trust prompt 不能由独立 guard 图替代。 |
+| PERF-01 | NOT_RUN | 24有效 receipts 和空场景／局部 overlay 子指标保留；阈值未变。 | 原始整体 FAIL、新 checker 同 receipts 复核未接受；中模型4 INCONCLUSIVE。 |
+| PERF-02 | NOT_RUN | 有效空闲／独立 cache 生命周期部分通过；局部 CPU / requested GPU 上限记录存在。 | 实际 driver VRAM／GPU timing、暗色、用户 NVIDIA 等仍未测。 |
+| PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
+| PKG-01 | NOT_RUN | 历史 Setup 静态／向导／远端安装检查通过；隐藏文件 roundtrip fixture PASS。 | 旧 a539 便携实际 FAIL 保留；ac5 新完整真包门未执行，980 新包未完成；fixture 不替代产品。 |
+| DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
+| CLOUD-01 | FAIL | 历史 a539 完整 SUCCESS 保留；ac5 Forms与upstream SUCCESS。 | ac5 Qt job FAIL，CodeQL最近仍RUNNING；980完整run RUNNING，不继承旧绿灯。 |
 
-当前可宣称的是：**`a5393be` 的上述完整云端与 Forms 工作流均成功**。
-不能把它写成全量视觉、性能、包审阅、后续 main、生产更新源或本地托管交付全部通过。
+## 8. 早期导航修复与来源边界
 
-## 3. 已关闭的旧失败与保留的原始记录
+旧017f78c的5个导航／英文／日文／生命周期崩溃保留；诊断40656943272六个故障
+上下文定位于诊断元数据 `QFontInfo::exactMatch()`，灰度实验未修复。产品移除危险
+查询，字体请求／回退／大小／绘制不变，`exactMatch:null` 带明确未查询原因，不伪造 true。
 
-- 旧 `017f78c` 的五个导航／英文／日文／生命周期崩溃真实发生过，不删除其日志。
-  诊断 run `40656943272` 的六个故障上下文定位于诊断元数据中的
-  `QFontInfo::exactMatch()`；灰度实验没有修复故障。修复只移除该危险查询，保留实际
-  字体请求、回退、大小和绘制；`exactMatch:null` 及明确原因不是伪造匹配成功。
-- 修复候选 [40663272343](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40663272343)
-  的 `navigation.log` 确认 **13/13 CTests 通过**：三语言导航及 presentation、UI cache
-  lifecycle、实际视口 gizmo、字体和覆盖层合同。字体为 30 数据行，含 init / cleanup 共 32。
-- 同一修复候选的中文像素子门为 **20/20 cases、60/60 rings**；冻结阈值仍是
-  RMSE `.06`、P95 `.16`、halo `.04`。它不是三语言 × 所有图层 × 所有视角的全组合。
-- 实际 gizmo 为 30 cases / 156 原始 PNG；scope 为中文、暗色、DPR1、透视／正交及两个
-  观察姿态。鼠标 X 16 / Y 8，Z 为 6 个数值操作用例；不声称已经实测全部鼠标 Z、
-  中心或平面约束组合。
-- 旧 Forms `40663276104` 的 initializer 窄窗失败被保留。修复滚动内容区及底部按钮后，
-  新通道已成功，但最新 16 类矩阵及正常尺寸原图仍须完成 artifact 审阅再写入本表。
+[40663272343](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40663272343)
+在 de764 的13/13 CTests通过，字体30数据行（含 init / cleanup共32），中文20/20
+cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽。
+这些是已完成的范围化证据，不是最新候选全部检查。
 
-保留证据目录：`D:/Codex/validation/gsw-ui-upgrade-20261028/`。原图不改写，
-不把辅助裁切／放大图当作正常尺寸视觉判断。
-
-## 4. 29 项范围化矩阵
-
-本表“状态”仅使用原合同的 `PASS / FAIL / NOT_RUN / UNSUPPORTED / NOT_APPLICABLE`。
-`NOT_RUN` 也用于尚未获得完整可接受结论的聚合门槛；已完成子门列在同一行，不抹掉其结果。
-这里不提供误导性的“29 项全通过”计数。
-
-| ID | 状态 | 已取得证据及严格范围 | 剩余 gate / 限制 |
-|---|---|---|---|
-| BASE-01 | PASS | 开始身份、并行修改与历史安装登记保留；本轮 a539 source / tree 已绑定。 | 每个新包及后续 main 仍需各自身份。 |
-| AUDIT-01 | NOT_RUN | 66 表面、16 Dialog、147 popup 调用点静态清单存在。 | 最终逐项运行／视觉签收；新增 updater 对话框另列增量表面，不能假称原 16 类已包含。 |
-| DPI-01 | NOT_RUN | de764 五档受控 Qt DPR 和逻辑／物理映射有真实元数据；高 DPR 小屏窗口修复已有远端运行。 | Windows 原生五档 OS 缩放及真实跨屏未测；`QT_SCALE_FACTOR` 不替代它们。 |
-| NAV-01 | NOT_RUN | de764 中文 20 cases / 60 rings 像素 PASS；部分正常尺寸原图已审阅。 | 全部受影响正常尺寸姿态／状态视觉签收仍未闭环；不跨源码重标截图。 |
-| NAV-02 | PASS | 修复后 de764 三语言真实输入短门通过；a539 完整 viewport 通道成功。 | 仅这些受控 Windows / software-GL 行为；不是用户 NVIDIA 或全部工程。 |
-| NAV-03 | NOT_RUN | de764 的 20 次主题／resize／语言生命周期通过，缓存合同通过。 | 真实跨屏仍 NOT_RUN，不能因单屏生命周期通过而豁免。 |
-| THEME-01 | UNSUPPORTED | 浅／深主题、白／暗场景背景保持；未用 Blender 灰掩盖缺陷。 | 任意用户 RGB / alpha 背景的可达配置在现有能力中缺失；不计为通过。 |
-| FONT-01 | NOT_RUN | 三语言安全字体证据 30 行通过，17-glyph / 0 missing 合同保留。 | 所有表单 artifact 的实际字体／基线及自绘 caption、轴、图表、初始化预览角色仍需分别审阅。 |
-| ICON-01 | NOT_RUN | AppTheme / UiRoles 公共合同已通过；a539 Forms 工作流成功。 | 最新五 DPR × 三语言 contact sheet、状态及正常尺寸视觉待 artifact 审阅。 |
-| SHELL-01 | NOT_RUN | 共享 tokens、透明标签、inspector wrap、有效窗口最小尺寸已实现；完整原生通道通过。 | 宽／窄窗关键动作、溢出、菜单、dock、任务、状态的逐表面签收仍待导入。 |
-| TREE-01 | NOT_RUN | 相关原生合同随完整通道通过；静态入口与 owner 已登记。 | 对应图像和选择／眼睛／滚动／分隔 resize 的具体证据映射尚待完整审阅。 |
-| GIZMO-01 | NOT_RUN | 四模式共用有界 native-DPR coverage；de764 实际 30 cases / 156 PNG。 | 原图正常尺寸多距离／边缘视觉闭环未完成；极端超预算 close-up 明确使用原向量回退。 |
-| GIZMO-02 | NOT_RUN | de764 真实鼠标 X / Y、数值 Z、取消／撤销相关断言通过；当前完整通道成功。 | 不扩大为尚未逐项确认的鼠标 Z、全部中心／平面手柄及组合。 |
-| MODEL-01 | NOT_RUN | a539 完整原生测试成功，原有多对象合同没有删除。 | 原／非当前、全隐藏恢复的状态／画面证据与本项逐项绑定尚待导入。 |
-| MODEL-02 | NOT_RUN | 受控 receipts 保留实际 renderer、计数、SH、变换和 fixture 身份。 | 点云／网格／3DGS／2DGS／任务预览的完整视觉签收不可由标签或性能 receipt 代替。 |
-| OVERLAY-01 | NOT_RUN | 选择／刷选／裁剪／提示入口已登记，完整原生回归通过。 | 多尺度／视角／状态原图及数据保护的具体证据仍需逐项确认。 |
-| GRID-01 | NOT_RUN | de764 三语 presentation 及 a539 viewport 通道通过。 | 自动／固定密度、mm / m / u、重开和模型切换证据需按本项签收，不只引用总绿灯。 |
-| FPS-01 | NOT_RUN | 新帧 serial / swap / metrics 及有效空闲原始时窗存在；未增加持续重绘计时器。 | 聚合性能尚无完整接受结论，不能只取局部 0 计数宣称整个门槛完成。 |
-| FORM-01 | FAIL | a539 Forms 工作流 SUCCESS；16 类192格证据完整，34行为检查通过。 | 原图实际发现初始化窄窗输入框裁切、批量训练按钮裁字及暗色表格白角；不能以完整capture计视觉PASS。修复及新断言待远端验收。 |
-| STATE-01 | NOT_RUN | 受控任务、worker 及表单合同随完整通道通过。 | 空／加载／忙／失败／取消／重试／不支持的具体 UI 证据尚待汇入，不制造固定成功文本。 |
-| LOCALE-01 | NOT_RUN | 三语言目录检查、修复后真实导航运行通过；当前 Forms / 完整 CI 成功。 | 全表单即时切换布局、长文本、混合文件名及状态保持的 artifact 审阅仍待完成。 |
-| A11Y-01 | NOT_RUN | focus inset、geometry 稳定、语义图标公共合同通过。 | 全表面 Tab / 快捷键 / tooltip / 可访问名 / 禁用原因仍需逐项闭环。 |
-| LIFE-01 | NOT_RUN | de764 UI cache 生命周期通过；a539 完整回归保留持久队列／取消合同。 | 窗口、任务、重连边界证据需对应签收；MainWindow 嵌套完整续训信任提示不由独立 guard 图替代。 |
-| PERF-01 | NOT_RUN | 24 份有效 receipts、空场景及部分 overlay 指标通过；冻结阈值未放宽。 | 原始整体结果 FAIL；修正 checker 尚未在相同 receipts 上取得新的远端复核；中模型四项 INCONCLUSIVE。见第 5 节。 |
-| PERF-02 | NOT_RUN | 有效空闲计数与独立生命周期部分通过；CPU / requested GPU 局部上限有记录。 | 驱动 VRAM 驻留、GPU 毫秒、暗色性能、用户 NVIDIA 等未测；requested bytes 不等于显存驻留。 |
-| PORT-01 | NOT_RUN | 固定 Blender 4.5 / Lucide 来源与 NOTICE、独立 Qt 适配器和未移植边界已登记。 | 最终候选包的资源／依赖／许可／修改及 hash 仍待静态签收；不声称复制了 Blender 5.2.3 GPU AA。 |
-| PKG-01 | FAIL | a539 完整构建及三语言安装器检查通过；Setup本地SHA匹配。 | 下载便携包被GitHub默认hidden-file过滤，backend/source清单不完整；旧包不修写为PASS，上传规则与实际回下载检查待远端验证。 |
-| DELIVER-01 | NOT_RUN | 托管安装协议及原有稳定启动器不变；本轮未动活动版本。 | 未发布候选；不得生成虚假的 `fullAcceptance:true`。发布后仍需 current / EXE / recognized shortcuts 独立读回。 |
-| CLOUD-01 | PASS | 精确 a539 的 Forms 及完整 Native Windows 三个 jobs 均 SUCCESS；见第 2 节。 | 仅此 source；82e7132 及后续提交的完整云端不能由它继承。PASS 不代替视觉、性能、包或交付门槛。 |
-
-## 5. 性能：原始 FAIL 与 INCONCLUSIVE 必须同时保留
-
-保留文件：
-`D:/Codex/validation/gsw-ui-upgrade-20261028/performance-run40663280091/results.json`。
-
-- 原始 `status` 是 **FAIL**，不能改写。
-- 原始 failure 是 `light-dpr1: paired fixture/fidelity/camera sequence mismatch: 3dgs/model`。
-  已诊断为跨进程累计 attribute / order upload counters 的绝对值比较；每个进程操作前后
-  的数值保持，不能把允许的预热调度差异误作模型改变。
-- 新 checker 改为比较语义模型身份及操作内零 upload deltas，同时保留原始绝对计数。
-  **源码修复不等于相同 receipts 已经重新验收**；远端针对同一批不可变 receipts 的
-  复核结果此处仍是 **NOT_RUN**。不需要为了这个 checker 修复重跑计时实验。
-- 中模型 `present_p50_ms`、`response_p50_ms`、`present_max_ms`、`response_max_ms`
-  四项测量结论是 **INCONCLUSIVE**：A 臂波动超过冻结噪声预算。即使各 pair 的差值
-  落在限制内，也不能无视波动改判 PASS。
-- 不放宽预算，不反复运行直到绿灯；旧图像和计时不重写。`INCONCLUSIVE` 不是已证明
-  性能退化，也不是“没有退化”。
-- 未测项继续包括实际 GPU 毫秒、driver VRAM residency、physical input-to-photon、
-  dark-theme performance、真实跨屏、用户 NVIDIA 和中等点云／网格／2DGS 压力。
-
-冻结文件仍为 `PERFORMANCE_PLAN.md` 与 `PERFORMANCE_ACCEPTANCE.json`；本报告没有
-改变阈值、重复单位、观察时窗、模型质量、渲染精度或原有测试 timeout。
-
-## 6. Forms artifact 与增量 updater 表面
-
-### 6.1 原 16 类表单
-
-**PENDING_FORMS_ARTIFACT_REVIEW**。
-
-待导入字段：source / tree、16 类完整性、三语 × 明暗 × 宽窄覆盖、实际 client geometry、
-font / glyph facts、原始 PNG 与 SHA-256、公开 options / request 前后不变快照、任何
-SKIP / NOT_RUN / 截断。Actions success 不能代替这些尚未审阅的明细。
-
-### 6.2 新 updater 对话框
-
-此界面来自并行授权的原生自动更新工作，原 66 表面 / 16 Dialog 基线未包含它，必须作为
-额外可达表面记录，不扩大原清单的覆盖声明。已知独立证据为
+原66表面未包含并行授权的 updater 对话框。独立
 [40718734156](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40718734156)
-在 `2e0cac4` 的 `isolated-update-ui`：真实 Qt 6.8.3 Windows widgets 7 PASS / 0 skip、
-三语 PNG、无自动弹窗／置顶操作。当前图像／后续 updater-only 改动需保持自己的 source 证据。
+在2e0cac4的 isolated-update-ui为7 PASS / 0 skip、三语图、无自动弹窗／置顶。
+后续 updater／品牌改动须保留自己的 source 身份；UI接入不代表公开生产 feed、签名、
+可信根或 bootstrap 迁移获准。缺失信任不能宣称“已是最新”。
 
-UI 接入不代表生产签名、公开更新源、可信根、bootstrap 迁移或生产发布获准；缺失信任
-不能显示为“已是最新”。普通 UI 版本发布不得替换 bootstrap 或重写稳定入口。
+## 9. 交付与下一步
 
-## 7. 包与本地交付
+当前 **NOT_DELIVERED**：没有生成完整接受凭证、没有调用托管 publisher，没有切换
+`current.json` 或重写快捷方式。旧运行／回滚版本、用户设置、工程、照片、模型和检查点保留。
 
-目前状态：**NOT_DELIVERED**。
+接下来必须分别处理：
 
-| 字段 | 当前值 |
-|---|---|
-| EXE / SHA-256 | PENDING_PACKAGE_DOWNLOAD_AND_STATIC_REVIEW |
-| Setup / SHA-256 | PENDING_PACKAGE_DOWNLOAD_AND_STATIC_REVIEW |
-| 对应 source / tree / files manifest | PENDING_PACKAGE_DOWNLOAD_AND_STATIC_REVIEW |
-| 安装器原始三语 caption / PNG 审阅 | PENDING_INSTALLER_RAW_PNG_REVIEW |
-| 完整接受凭证 | NOT_CREATED；当前仍有明确开放 gate |
-| managed publisher / publication record | NOT_RUN |
-| current.json / active EXE / recognized shortcuts 一致读回 | NOT_RUN |
-| 活动版本、运行／回滚版本保留 | 本轮未改变安装，不将“未改变”写成新版本已交付 |
+1. 对 ac5 grid timeout 做一次有界、原失败二进制诊断；原因未知前不猜修、不延时刷绿。
+2. 等980对应完整 CI 与实际产品 artifact，核对 source / EXE / Setup / manifest /
+   source resources / hidden files / 许可和依赖；不要拿 fixture 或历史包替代。
+3. 完成尚未签收的表面、视觉、无障碍及 provider／硬件／OS支持边界；已通过的16类矩阵
+   和3处修复不再写成待导入，也不扩张为全部UI完成。
+4. 旧 performance receipts 的 checker 修复仅做远端复核；中模型噪声仍独立INCONCLUSIVE，
+   不扩大预算或反复计时寻求绿灯。
+5. 只有精确候选相关门槛真正闭环后，按 `docs/NATIVE_UPDATES.md` 生成实际完整接受凭证，
+   使用 managed publisher，再独立读回 current / active EXE / recognized shortcuts。
+   普通更新不改 bootstrap，不重复迁移入口、不关闭程序；固定目录Setup为独立adapter。
 
-后续按 `docs/NATIVE_UPDATES.md` 使用托管 publisher；先完成对应 source 的接受与包静态
-审阅，再原子切换版本。桌面、开始菜单、任务栏继续使用稳定原生 launcher。普通更新不
-重复迁移快捷方式、不关闭程序、不改工程或训练状态。固定目录 Setup 是独立 adapter。
-
-## 8. 下一步及完成条件
-
-1. 导入当前 Forms artifact，逐项核对原图／矩阵／参数快照，保留真实缺项。
-2. 下载精确 a539 包和安装器证据，只做本地文件／hash／依赖／许可静态审阅；不运行本地 GUI。
-3. 完成正常尺寸代表图及剩余表面的视觉签收；硬件／OS／provider 限制明确保留。
-4. 对旧计时 receipts 的 checker 修复做远端复核；中模型噪声仍独立 INCONCLUSIVE，
-   不用重复刷绿或放宽门槛消除它。
-5. 如后续 main 要作为发布 source，取得其对应接受及包身份；不能把 a539 的绿色改名继承。
-6. 只有相关 gate 真正闭环后才生成完整接受凭证及执行 managed publication，并独立读回交付身份。
-
-视觉更精致不等于重建几何更准确、训练更快或质量更高；本轮没有作这些声明。
+本轮没有声称训练更快、模型质量／重建几何更准确；UI清晰度、行为、性能、包与交付必须分别有证据。
