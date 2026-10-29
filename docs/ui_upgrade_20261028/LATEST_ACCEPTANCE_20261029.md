@@ -2,6 +2,41 @@
 
 Status: **VERIFIED_7F76_PACKAGE_AND_A105_CLOUD / NEW_UI_REGRESSIONS_RUNNING / PERFORMANCE_REANALYSED_INCONCLUSIVE / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
+## 0D. 改名后的真实路径合同与单目标远端复验通过
+
+owner9db / run40827898735的upstream并非初始化算法失败：原测试输出的inputs/points/reports
+最终长度为261/260/262，既有worker按`>=260`明确拒绝；两处仓库路径名称增加合计4字符，
+使原“正向目标必可发布”的测试前提失效。原路径和原FAIL日志保留，worker、MAX_PATH保护、
+训练、信任、原180秒deadline以及已有`+2`邻近路径断言都未修改。
+
+QA现在分别要求：原caller-root真实尝试在越界时返回明确MAX_PATH、0信号、无目标/残留stage、
+空报告且source metadata/image bytes不变；另在**显式独立正向workspace**用同一source/identity/
+完整request重新进行真实检查、核相同pointSHA，再完整验证单次发布、禁止重复、重开、配方修改
+和三语警告。没有移动或缩短原失败路径；正向预算不满足即FAIL，不搜索更短目录或跳过检查。
+
+精确 **f3faac0e623d205bd8baf9c1aaeef51a21ef1af2**、tree
+`c79519f3ffb0c17b17079dcdce9d3a38cc8f8450` 的
+[Native Initialization Contract40833862126](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40833862126)
+**SUCCESS**：仅构建实际`gsw_initialization_dialog_ui_tests`，实际CTest 4.75秒，未构建/启动桌面主程序、
+GPU或训练。原caller输出274/273/275真实拒绝且无发布；独立正向190/189/191完整成功链通过。
+该CPU合同不等于GPU训练、完整2DGS发布、Forms视觉或最终整合源已接受。
+
+唯一小artifact12879309765为11823 bytes，SHA
+`5d240cdf7310498cda2d34d0a79b3f328e4697784c415d9f713ecc955e2dd1fd`；
+证据目录`D:/Codex/validation/gsw-ui-upgrade-20261028/initialization-contract-run40833862126/`。
+远端测试EXE SHA `5bf2ab022ed8703ea175bad583568fa96344e554cf55731168aeb55b838c9b97`，
+这是测试EXE而非产品主EXE，本机没有下载或执行该EXE。
+
+另外，历史精确c3e/run40823880544现在**完整三job SUCCESS**，Qt175/175、真实包回读3044文件/28隐藏文件
+及37阶段grid trace已按小证据单独核对；见`C3E_FULL_SCOPED_20261029.md/.json`。
+该自然grid 6.00秒PASS不能证明旧15秒超时根因已修复，也不外推新不可变repo-ID guard。
+只下载两份小证据，没有重复下载非最终大包、安装或切换本机。
+
+b646 Forms40828325789的旧FAIL同样保留：原34只剩初始化路径前提失败，菜单已越过归属门，
+但三语均为 **NOT_RUN_F10_NOT_OBSERVED**（Qt合成事件一次、无业务状态改变）；它不能证明原生键盘
+不可用，也不能算菜单A11y通过。隔离远端原生输入探针仍在设计，未武装、未执行。
+最新owner整合0ec8615包含上述QA修正，仍需要自己的完整CI/最终包，不继承旧c3e通过。
+
 ## 0C. c3e 复验：两处产品子门通过，剩余 QA 前置合同纠正
 
 [Forms40823927939](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40823927939)
