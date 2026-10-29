@@ -8,6 +8,27 @@ import native_i18n as i18n
 
 
 class CatalogTests(unittest.TestCase):
+    def test_renamed_display_brand_preserves_complete_locales(self):
+        catalog = i18n.load_catalog()
+        brand = 'Gaussian Splatting Workbench'
+        for source in ('打开 Gaussian Splatting Workbench 工程',
+                       '关于 Gaussian Splatting Workbench',
+                       '确定要退出 Gaussian Splatting Workbench Native 吗？'):
+            self.assertEqual(set(catalog[source]), {'zh_CN', 'en_US', 'ja_JP'})
+            for target in catalog[source].values():
+                self.assertIn(brand, target)
+        branded_entries = {source: translations for source, translations in catalog.items()
+                           if brand in source}
+        self.assertGreaterEqual(len(branded_entries), 6)
+        self.assertEqual(i18n.validate(branded_entries, {}), [])
+        for source, translations in branded_entries.items():
+            for target in translations.values():
+                self.assertIn(brand, target, source)
+                self.assertNotIn('Gaussian Scene Workbench', target)
+        # Product display naming must not turn the old settings/storage keys into UI.
+        self.assertFalse(i18n.requires_translation('Gaussian Scene Workbench'))
+        self.assertFalse(i18n.requires_translation('Gaussian Scene Workbench/temporary'))
+
     def test_responsive_training_monitor(self):
         catalog = i18n.load_catalog()
         for source in ('训练监视内容', '缩小面板时可滚动查看全部信息；指标会随宽度自动换行。'):

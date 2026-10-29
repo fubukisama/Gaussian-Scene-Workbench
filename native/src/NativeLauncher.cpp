@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
   if (FAILED(SetCurrentProcessExplicitAppUserModelID(reinterpret_cast<LPCWSTR>(applicationId.utf16())))) return 4;
 #endif
   QCoreApplication application(argc, argv);
+  // Persistent settings identity must match existing installations across a display rename.
   QCoreApplication::setOrganizationName(QStringLiteral("GaussianSceneWorkbench"));
   QCoreApplication::setApplicationName(QString::fromLatin1("Gaussian Scene Workbench"));
   const QString language = QSettings().value(QStringLiteral("ui/language"), QStringLiteral("zh_CN")).toString();

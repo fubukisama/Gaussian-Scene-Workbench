@@ -13,6 +13,14 @@ on:
       - 'docs/images/**'
       - '.github/scripts/check_public_docs.py'
       - '.github/workflows/documentation.yml'
+      - 'scripts/check_native_branding.py'
+      - 'native/src/main.cpp'
+      - 'native/src/NativeLauncher.cpp'
+      - 'native/src/NativeInstallation.h'
+      - 'native/assets/gsw-app-icon.rc'
+      - 'native/build_manifest.json'
+      - 'native/i18n/catalog.json'
+      - 'packaging/windows/gsw.iss'
   pull_request:
     paths:
       - 'README*.md'
@@ -24,6 +32,14 @@ on:
       - 'docs/images/**'
       - '.github/scripts/check_public_docs.py'
       - '.github/workflows/documentation.yml'
+      - 'scripts/check_native_branding.py'
+      - 'native/src/main.cpp'
+      - 'native/src/NativeLauncher.cpp'
+      - 'native/src/NativeInstallation.h'
+      - 'native/assets/gsw-app-icon.rc'
+      - 'native/build_manifest.json'
+      - 'native/i18n/catalog.json'
+      - 'packaging/windows/gsw.iss'
   workflow_dispatch:
 
 permissions:
@@ -40,3 +56,5 @@ jobs:
           python-version: '3.12'
       - name: Check public document formatting and links
         run: python -B .github/scripts/check_public_docs.py
+      - name: Check display brand and persistent identity compatibility
+        run: python -B scripts/check_native_branding.py

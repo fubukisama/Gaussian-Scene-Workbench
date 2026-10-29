@@ -1,10 +1,10 @@
 <div lang="en">
 
 <p align="center">
-  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench icon">
+  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Splatting Workbench icon">
 </p>
 
-<h1 align="center" lang="en">Gaussian Scene Workbench</h1>
+<h1 align="center" lang="en">Gaussian Splatting Workbench</h1>
 
 <p align="center">
   <strong>Reconstruct, train and edit Gaussian scenes in one native workspace.</strong>

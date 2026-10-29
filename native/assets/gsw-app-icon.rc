@@ -4,5 +4,5 @@ IDI_APP_ICON ICON "gsw-app-icon.ico"
 
 STRINGTABLE
 BEGIN
-  201 "Gaussian Scene Workbench"
+  201 "Gaussian Splatting Workbench"
 END

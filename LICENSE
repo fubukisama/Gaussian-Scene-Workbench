@@ -1,7 +1,9 @@
-Gaussian Scene Workbench - License overview
-===========================================
+Gaussian Splatting Workbench - License overview
+=============================================
 
 This repository uses component-specific licenses, not a choice of MIT or GPL for every file. This overview does not change any existing grant.
+
+Gaussian Splatting Workbench (GSW) was previously named Gaussian Scene Workbench. The rename does not change license scope or earlier grants; original license notices below retain their original wording.
 
 Native desktop main program: GPL-3.0-or-later
 -------------------------------------------

@@ -1,6 +1,6 @@
 <div lang="en">
 
-# Gaussian Scene Workbench Native
+# Gaussian Splatting Workbench Native
 
 Licensing / <span lang="zh-CN">许可</span> / <span lang="ja">ライセンス</span>: [short three-language guide](../docs/LICENSING.md) · [repository terms](../LICENSE). Component-specific grants and existing notices are unchanged.
 

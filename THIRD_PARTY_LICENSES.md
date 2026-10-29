@@ -38,7 +38,7 @@ GPL私用原型换许可证。Faster-GS另按Apache-2.0下载。研究训练后�
 ライセンスを保持します。GPL私用原型のライセンス変更ではありません。
 Faster-GSは別途Apache-2.0で取得し、研究用学習バックエンドの制限は維持します。
 
-Gaussian Scene Workbench contains components under several licenses. From the 2026-10-14 licensing change, the original native desktop main program is GPL-3.0-or-later within the scope in [native/LICENSE.md](native/LICENSE.md). Earlier MIT grants and original code outside that scope retain the root MIT terms. Neither grant overrides third-party licenses or grants commercial rights to restricted research components. The project's research purpose is not an additional use restriction on its GPL or MIT code.
+Gaussian Splatting Workbench (formerly Gaussian Scene Workbench) contains components under several licenses. From the 2026-10-14 licensing change, the original native desktop main program is GPL-3.0-or-later within the scope in [native/LICENSE.md](native/LICENSE.md). Earlier MIT grants and original code outside that scope retain the root MIT terms. Neither grant overrides third-party licenses or grants commercial rights to restricted research components. The project's research purpose is not an additional use restriction on its GPL or MIT code.
 
 ## Experimental quality rasterizer / 实验性质量光栅器 / 実験的品質ラスタライザ
 

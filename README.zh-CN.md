@@ -1,10 +1,10 @@
 <div lang="zh-CN">
 
 <p align="center">
-  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench 图标">
+  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Splatting Workbench 图标">
 </p>
 
-<h1 align="center" lang="en">Gaussian Scene Workbench</h1>
+<h1 align="center" lang="en">Gaussian Splatting Workbench</h1>
 
 <p align="center">
   <strong>从照片到高斯场景：在一个原生工作台里完成重建、训练与编辑。</strong>
@@ -29,7 +29,7 @@
 
 ---
 
-**高斯场景研究工作台（GSW）**把高斯泼溅、摄影测量、点云和网格工作流放进 Qt / C++ 原生桌面。可以从照片、视频、已知相机开始，也可以直接打开已有模型。
+<strong lang="en">Gaussian Splatting Workbench (GSW)</strong> 把高斯泼溅、摄影测量、点云和网格工作流放进 Qt / C++ 原生桌面。可以从照片、视频、已知相机开始，也可以直接打开已有模型。
 
 ## 一个工作台，六项核心能力
 

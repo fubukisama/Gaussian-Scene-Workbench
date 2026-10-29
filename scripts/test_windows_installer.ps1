@@ -370,8 +370,10 @@ function Get-DesktopShortcutSnapshot {
   $result = [ordered]@{}
   foreach ($desktop in @([Environment]::GetFolderPath('DesktopDirectory'), [Environment]::GetFolderPath('CommonDesktopDirectory')) | Select-Object -Unique) {
     if (-not $desktop) { continue }
-    $shortcut = Join-Path $desktop 'Gaussian Scene Workbench.lnk'
-    $result[$shortcut] = if (Test-Path -LiteralPath $shortcut -PathType Leaf) { Get-Sha256 $shortcut } else { 'absent' }
+    foreach ($name in @('Gaussian Scene Workbench.lnk', 'Gaussian Splatting Workbench.lnk')) {
+      $shortcut = Join-Path $desktop $name
+      $result[$shortcut] = if (Test-Path -LiteralPath $shortcut -PathType Leaf) { Get-Sha256 $shortcut } else { 'absent' }
+    }
   }
   return ConvertTo-Json -InputObject $result -Compress
 }
@@ -537,11 +539,11 @@ try {
   foreach ($locale in @('zh_CN', 'en_US', 'ja_JP')) {
     $install = Join-Path $script:runRoot ($locale + ' 程序 安装')
     $group = 'GSW Installer Acceptance ' + $runId + ' ' + $locale
-    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) ($group + '/Gaussian Scene Workbench.lnk')
+    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) ($group + '/Gaussian Splatting Workbench.lnk')
     Assert-Condition (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath))) 'Acceptance Start menu group already exists.'
     Assert-Condition ((Get-DesktopShortcutSnapshot) -eq $desktopBefore) 'Production desktop shortcut state changed before locale test.'
     $desktopTask = if ($testDesktopIcon) { '/TASKS=desktopicon' } else { '/TASKS=!desktopicon' }
-    $desktopShortcutPath = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Gaussian Scene Workbench.lnk'
+    $desktopShortcutPath = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Gaussian Splatting Workbench.lnk'
     $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOCLOSEAPPLICATIONS', '/NORESTARTAPPLICATIONS',
       $desktopTask, ('/LANG=' + $locale), ('/DIR=' + $install), ('/GROUP=' + $group))
     Invoke-HiddenInstaller $SetupPath ($arguments + ('/LOG=' + (Join-Path $logs ($locale + '-install.log'))))
@@ -549,7 +551,7 @@ try {
     $records = @(Get-UninstallRecord $build.appId)
     Assert-Condition ($records.Count -eq 1 -and $records[0].view -eq 'Registry64') 'Expected one per-user x64 Windows uninstall entry.'
     $record = $records[0]
-    Assert-Condition ($record.displayName -eq 'Gaussian Scene Workbench' -and $record.displayVersion -eq $build.version) 'Wrong Windows installed-program identity/version.'
+    Assert-Condition ($record.displayName -eq 'Gaussian Splatting Workbench' -and $record.displayVersion -eq $build.version) 'Wrong Windows installed-program display name/version.'
     Assert-Condition (Test-SamePath $record.installLocation $install) 'Wrong uninstall install-location.'
     Test-InstalledShortcut $shortcutPath $install
     if ($testDesktopIcon) { Test-InstalledShortcut $desktopShortcutPath $install }

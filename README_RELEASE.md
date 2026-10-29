@@ -1,6 +1,6 @@
 <div lang="en">
 
-# Get Gaussian Scene Workbench
+# Get Gaussian Splatting Workbench
 
 [English](#english) · <span lang="zh-CN">[简体中文](#简体中文)</span> · <span lang="ja">[日本語](#日本語)</span>
 
@@ -9,6 +9,8 @@ Windows x64 · Native preview · [Back to the project](README.md)
 <div lang="en">
 
 ## English
+
+Gaussian Splatting Workbench was previously named Gaussian Scene Workbench. The **GSW** abbreviation and existing executable filenames, settings keys and repository identifiers remain unchanged for compatibility.
 
 ### Download the preview
 
@@ -39,6 +41,8 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ## 简体中文
 
+<span lang="en">Gaussian Splatting Workbench</span> 原名为 <span lang="en">Gaussian Scene Workbench</span>。**GSW** 缩写及既有程序文件名、设置键和仓库标识保持不变，以保留兼容性。
+
 ### 下载预览版
 
 目前尚无公开的原生 Release。请在所需提交的 [Native Windows](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/workflows/native-windows.yml) **完整成功运行**中获取附件：
@@ -67,6 +71,8 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 <div lang="ja">
 
 ## 日本語
+
+<span lang="en">Gaussian Splatting Workbench</span> の旧名称は <span lang="en">Gaussian Scene Workbench</span> です。互換性のため、**GSW** の略称と既存の実行ファイル名・設定キー・リポジトリー識別子は維持します。
 
 ### プレビュー版の入手
 

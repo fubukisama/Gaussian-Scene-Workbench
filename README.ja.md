@@ -1,10 +1,10 @@
 <div lang="ja">
 
 <p align="center">
-  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Scene Workbench のアイコン">
+  <img src="native/assets/gsw-app-icon.png" width="88" alt="Gaussian Splatting Workbench のアイコン">
 </p>
 
-<h1 align="center" lang="en">Gaussian Scene Workbench</h1>
+<h1 align="center" lang="en">Gaussian Splatting Workbench</h1>
 
 <p align="center">
   <strong>写真からガウスシーンへ。再構築・学習・編集を一つのネイティブ環境で。</strong>
@@ -29,7 +29,7 @@
 
 ---
 
-**ガウスシーン研究ワークベンチ（GSW）**は、Gaussian Splatting・写真測量・点群・メッシュを扱う Qt / C++ のネイティブデスクトップです。写真、動画、既知カメラ、既存モデルから作業を始められます。
+<strong lang="en">Gaussian Splatting Workbench (GSW)</strong> は、Gaussian Splatting・写真測量・点群・メッシュを扱う Qt / C++ のネイティブデスクトップです。写真、動画、既知カメラ、既存モデルから作業を始められます。
 
 ## 一つの環境、六つの基本機能
 

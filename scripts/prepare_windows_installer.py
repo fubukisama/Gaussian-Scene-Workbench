@@ -19,9 +19,9 @@ MESSAGES = {
     "GswRuntimeTitle": "安装内容与训练环境",
     "GswRuntimeSubtitle": "桌面程序与研究运行环境分开管理。",
     "GswRuntimeBody": "本安装程序包含原生桌面程序、Qt 运行库、计算后端代码、对应源码和许可证。CUDA、PyTorch、Python/Conda、COLMAP 及其他研究运行库需要另行配置；不会复制或改动你已有的训练环境。\n\n默认优先安装到可写的非系统盘；你可以在下一步更改目录。升级和卸载只处理已安装的程序文件，不删除你新增的工程、模型、照片、检查点或设置。升级前请自行保存并关闭正在运行的程序；安装器不会强制结束或自动启动程序。",
-    "GswFinished": "安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Scene Workbench。程序不会自动启动。",
+    "GswFinished": "安装完成。可从开始菜单或你选择的桌面快捷方式打开 Gaussian Splatting Workbench。程序不会自动启动。",
     "GswUnsafeDirectory": "请选择专用的程序子文件夹，不要选择磁盘根目录、Windows 目录或用户主目录。",
-    "GswNonemptyDirectory": "此目录包含其他文件，且不是已有的 Gaussian Scene Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。",
+    "GswNonemptyDirectory": "此目录包含其他文件，且不是已有的 Gaussian Splatting Workbench 安装目录。请选择空目录或已有程序目录；不会覆盖无关文件。",
     "GswBusyInstall": "已安装文件正在使用或无法写入。请保存并关闭正在使用此安装目录的程序，确认写入权限后重试；安装器不会强制结束任何进程。",
 }
 REQUIRED = (
@@ -189,6 +189,7 @@ def prepare(package, work, output, source_root, test_build=False):
     app_id = "Fubukisama.GaussianSceneWorkbench.Native"
     if test_build:
         app_id = "GSW.Test." + uuid.uuid4().hex
+    # Legacy machine identity is stable across the display-brand rename.
     (payload / "gsw-installation.ini").write_text(
         "[Installation]\nProduct=Gaussian Scene Workbench\nAppId=" + app_id +
         "\nVersion=" + build["version"] + "\n", encoding="ascii")

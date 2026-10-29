@@ -156,10 +156,11 @@ int main(int argc, char *argv[]) {
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication application(argc, argv);
+  // Keep the established settings identity; the public product name is display-only.
   QCoreApplication::setOrganizationName(QStringLiteral("GaussianSceneWorkbench"));
   QCoreApplication::setOrganizationDomain(QStringLiteral("github.com/fubukisama"));
   QCoreApplication::setApplicationName(QStringLiteral("Gaussian Scene Workbench"));
-  QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Scene Workbench Native"));
+  QGuiApplication::setApplicationDisplayName(QStringLiteral("Gaussian Splatting Workbench Native"));
   QCoreApplication::setApplicationVersion(QStringLiteral(GSW_VERSION));
   const QStringList smokeArguments = application.arguments();
   std::unique_ptr<QTemporaryDir> smokeSettings;
@@ -212,7 +213,7 @@ int main(int argc, char *argv[]) {
                           scaleMode == gsw::UiScaleMode::Automatic);
 
   QCommandLineParser parser;
-  parser.setApplicationDescription(QStringLiteral("Gaussian Scene Workbench native desktop application"));
+  parser.setApplicationDescription(QStringLiteral("Gaussian Splatting Workbench native desktop application"));
   parser.addHelpOption();
   parser.addVersionOption();
   QCommandLineOption languageOption(QStringLiteral("language"),
@@ -1981,7 +1982,7 @@ int main(int argc, char *argv[]) {
         const QString cancelText = QCoreApplication::translate("Workbench", "取消");
         state->exitPromptFound =
             prompt->text().contains(QCoreApplication::translate(
-                "Workbench", "确定要退出 Gaussian Scene Workbench Native 吗？")) &&
+                "Workbench", "确定要退出 Gaussian Splatting Workbench Native 吗？")) &&
             defaultButton != nullptr && defaultButton->text() == cancelText &&
             escapeButton != nullptr && escapeButton->text() == cancelText;
         if (!state->exitPromptFound) {
