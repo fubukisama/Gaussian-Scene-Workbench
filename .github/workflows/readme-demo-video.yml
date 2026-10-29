@@ -30,7 +30,6 @@ jobs:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      DEMO_ROOT: ${{ runner.temp }}/gsw-readme-real-operation
       # These are deliberate historical package coordinates, NOT current-main
       # acceptance. The artifact name predates its current product version.
       NATIVE_RUN_ID: '40743102181'
@@ -57,6 +56,10 @@ jobs:
         shell: pwsh
         run: |
           if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted') { throw 'A disposable GitHub-hosted runner is required.' }
+          # runner context is not available in jobs.<job>.env. Bind the actual
+          # hosted-runner temp path at step runtime instead of hard-coding it.
+          $env:DEMO_ROOT = Join-Path $env:RUNNER_TEMP 'gsw-readme-real-operation'
+          "DEMO_ROOT=$env:DEMO_ROOT" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
           New-Item -ItemType Directory -Path $env:DEMO_ROOT | Out-Null
           & '${{ steps.python.outputs.python-path }}' -m pip install --no-input pywinauto==0.6.8 comtypes==1.4.8 pywin32==308 Pillow==11.0.0 imageio-ffmpeg==0.6.0
           if ($LASTEXITCODE -ne 0) { throw 'Pinned capture dependencies could not be provisioned.' }
