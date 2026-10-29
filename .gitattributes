@@ -6,3 +6,7 @@
 /docs/ui_upgrade_20261028/PERFORMANCE_PLAN.md text eol=lf
 /docs/ui_upgrade_20261028/PERFORMANCE_ACCEPTANCE.json text eol=lf
 /docs/ui_upgrade_20261028/P0_PROTOCOL.json text eol=lf
+# Published demo receipts bind exact text bytes across Windows/Linux checkouts.
+/docs/media/*.json text eol=lf
+/docs/media/*.srt text eol=lf
+/scripts/compose_readme_demo.py text eol=lf

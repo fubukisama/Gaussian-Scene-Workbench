@@ -33,6 +33,16 @@
 
 [为什么选择 GSW](#为什么选择-gsw) · [选择你的起点](#选择你的起点) · [功能一览](#功能一览) · [开始使用](#开始使用) · [文档](#文档)
 
+## 看它实际运行
+
+从随机初始化到真实 3DGS / 2DGS 训练成果，再看原生视角操作、模型移动与撤销，以及 PLY 导出。
+
+<p align="center"><a href="docs/media/gsw-native-operation.en.mp4"><img src="docs/media/gsw-native-preview.zh-CN.gif" width="640" alt="真实原生操作选段，展示实际3DGS与2DGS训练快照、视角操作和导出"></a></p>
+
+[完整 MP4 · 73 秒](docs/media/gsw-native-operation.en.mp4) · [中文字幕](docs/media/gsw-native-operation.zh-CN.srt) · [场景文件与素材来源](docs/media/README.md)
+
+<sub>使用原创合成图像实际 GPU 训练，录像回放已保存阶段，并非实时训练。完整版保留英文界面的原速操作；动图为选段。本次短程演示不属于质量、精度或速度基准测试。</sub>
+
 ## 界面图解
 
 点击图片可查看原尺寸控件。这些是真实程序界面，不是概念图。

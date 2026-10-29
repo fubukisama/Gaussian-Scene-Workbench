@@ -9,17 +9,19 @@ import argparse
 from html.parser import HTMLParser
 import hashlib
 import json
+import math
 from pathlib import Path
 import posixpath
 import re
 import subprocess
 from urllib.parse import unquote, urlsplit
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PRIMARY = (
     "README.md", "README.zh-CN.md", "README.ja.md", "README_RELEASE.md",
     "native/README.md", "native/LICENSE.md", "docs/README.md",
-    "docs/LICENSING.md", "docs/images/README.md",
+    "docs/LICENSING.md", "docs/images/README.md", "docs/media/README.md",
 )
 LANGUAGE_PAGES = {"README.md": "en", "README.zh-CN.md": "zh-CN", "README.ja.md": "ja"}
 OVERVIEW_BADGE_TARGETS = {
@@ -27,7 +29,8 @@ OVERVIEW_BADGE_TARGETS = {
     "README.zh-CN.md": ("下载预览版", "使用前确认"),
     "README.ja.md": ("プレビュー版の入手", "利用前の確認"),
 }
-MULTILINGUAL = {"README_RELEASE.md", "docs/README.md", "docs/LICENSING.md", "native/README.md", "docs/images/README.md", "docs/TRAINING_PERFORMANCE.md"}
+MULTILINGUAL = {"README_RELEASE.md", "docs/README.md", "docs/LICENSING.md", "native/README.md", "docs/images/README.md", "docs/media/README.md", "docs/TRAINING_PERFORMANCE.md"}
+DEMO_READMES = {"README.md": "en", "README.zh-CN.md": "zh-CN", "README.ja.md": "ja"}
 
 
 class Html(HTMLParser):
@@ -179,6 +182,233 @@ def check_readme_media(tracked):
     return errors, len(images)
 
 
+def file_sha256(path):
+    """Hash large published recordings without loading them into memory."""
+    result = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 ** 2), b""):
+            result.update(block)
+    return result.hexdigest()
+
+
+def demo_require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def demo_json(path):
+    demo_require(path.stat().st_size <= 2 * 1024 ** 2, "demo JSON exceeds the bounded metadata size")
+    value = json.loads(path.read_text(encoding="utf-8-sig"))
+    demo_require(isinstance(value, dict), "demo metadata must be a JSON object")
+    return value
+
+
+def demo_file(name, tracked):
+    # Receipt entries are basenames, not paths supplied to an extraction tool.
+    demo_require(isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", name),
+                 "demo path must be a safe file basename")
+    relative = "docs/media/" + name
+    path = ROOT / relative
+    demo_require(relative in tracked and path.is_file() and not path.is_symlink()
+                 and path.resolve().is_relative_to(ROOT.resolve())
+                 and path.resolve().parent == (ROOT / "docs/media").resolve(),
+                 "demo path is missing, escaping or unpublished: " + relative)
+    return path
+
+
+def demo_document_targets(relative):
+    clean = "\n".join(without_fences((ROOT / relative).read_text(encoding="utf-8-sig"), []))
+    clean = re.sub(r"<!--.*?-->", "", clean, flags=re.S)
+    clean = re.sub(r"(`+).*?\1", "", clean, flags=re.S)
+    parser = Html()
+    parser.feed(clean)
+    # Starting at ]( also finds both destinations in [![preview](GIF)](MP4).
+    targets = [(value, False) for value in re.findall(r"\]\((<[^>\n]+>|[^)\n]+)\)", clean)]
+    targets.extend((value, True) for value in parser.links)
+    result = set()
+    for value, html in targets:
+        url = urlsplit(link_destination(value, html))
+        if not url.scheme and not url.netloc and url.path:
+            result.add(posixpath.normpath(posixpath.join(posixpath.dirname(relative), unquote(url.path))))
+    return result
+
+
+def demo_number(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def demo_video_contract(receipt):
+    """Check declared timing/claim boundaries, not pixels or playback quality."""
+    demo_require(receipt.get("schema") == "gsw.readme_demo_composition/1"
+                 and receipt.get("status") == "composed_not_visually_accepted"
+                 and receipt.get("visual_review_required") is True
+                 and receipt.get("no_live_training_or_quality_benchmark_claim") is True
+                 and receipt.get("original_raw_unchanged") is True,
+                 "demo receipt must preserve the unaccepted visual/quality claim boundary")
+    video = receipt.get("continuous_video")
+    preview = receipt.get("preview_gifs")
+    demo_require(isinstance(video, dict) and isinstance(preview, dict), "demo video contracts are missing")
+    demo_require(video.get("file") == "gsw-native-operation.en.mp4"
+                 and demo_number(video.get("speed")) and video["speed"] == 1
+                 and all(video.get(key) is False for key in ("ui_crop", "ui_scale", "frame_interpolation", "cuts", "audio_added"))
+                 and video.get("ui_rectangle") == [0, 0, 1600, 936]
+                 and video.get("external_footer_rectangle") == [0, 936, 1600, 88],
+                 "continuous demo must retain the unscaled, uncropped UI at original speed without cuts/interpolation")
+    raw, composed = video.get("raw_observation"), video.get("composed_observation")
+    demo_require(isinstance(raw, dict) and isinstance(composed, dict), "demo duration observations are missing")
+    duration = composed.get("duration_seconds")
+    demo_require(demo_number(duration) and duration > 0 and demo_number(raw.get("duration_seconds"))
+                 and abs(duration - raw["duration_seconds"]) <= .1
+                 and (raw.get("width"), raw.get("height")) == (1600, 936)
+                 and (composed.get("width"), composed.get("height")) == (1600, 1024)
+                 and type(raw.get("decoded_frames")) is int and raw["decoded_frames"] > 1
+                 and composed.get("decoded_frames") == raw["decoded_frames"],
+                 "continuous demo duration/frame/dimension declarations disagree")
+    demo_require(preview.get("dimensions") == [640, 448]
+                 and demo_number(preview.get("speed_within_each_excerpt")) and preview["speed_within_each_excerpt"] == 1
+                 and preview.get("selected_excerpts_not_continuous_capture") is True
+                 and preview.get("localized_external_captions_not_native_ui_language_changes") is True,
+                 "GIF previews must declare original-speed excerpts and external localized captions")
+    ranges = preview.get("source_ranges")
+    demo_require(isinstance(ranges, list) and ranges, "GIF source excerpt ranges are missing")
+    position = previous_source_end = 0.0
+    for row in ranges:
+        demo_require(isinstance(row, dict) and all(demo_number(row.get(key)) for key in
+                     ("source_start", "source_end", "output_start", "output_end")), "invalid GIF source excerpt timing")
+        start, end = row["source_start"], row["source_end"]
+        demo_require(previous_source_end <= start < end <= duration + .001
+                     and abs(row["output_start"] - position) <= .001
+                     and abs((row["output_end"] - row["output_start"]) - (end - start)) <= .001,
+                     "GIF excerpt range changes speed, overlaps or escapes the source duration")
+        position, previous_source_end = row["output_end"], end
+    demo_require(0 < position <= 30.001, "GIF excerpt duration is outside the documented limit")
+    timeline = receipt.get("chapter_timeline")
+    demo_require(isinstance(timeline, list) and timeline, "demo chapter timeline is missing")
+    intervals = []
+    previous = 0
+    for row in timeline:
+        demo_require(isinstance(row, dict) and demo_number(row.get("start")) and demo_number(row.get("end")),
+                     "invalid demo chapter timing")
+        start, end = round(row["start"] * 1000), round(row["end"] * 1000)
+        demo_require(previous <= start < end <= round(duration * 1000) + 1,
+                     "demo chapter timing overlaps or escapes the source duration")
+        intervals.append((start, end))
+        previous = end
+    return duration, intervals
+
+
+def demo_srt_intervals(path, duration):
+    demo_require(path.stat().st_size <= 2 * 1024 ** 2, "SRT exceeds the bounded text size")
+    text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    demo_require(text.strip() and "\ufffd" not in text and "\x00" not in text, "SRT must contain nonempty UTF-8 text")
+    intervals = []
+    stamp = r"(\d{2,}):([0-5]\d):([0-5]\d),(\d{3})"
+    for index, block in enumerate(re.split(r"\n\s*\n", text.strip()), 1):
+        lines = block.splitlines()
+        demo_require(len(lines) >= 3 and lines[0] == str(index) and "\n".join(lines[2:]).strip(),
+                     "SRT cues need consecutive numbering and nonempty captions")
+        match = re.fullmatch(stamp + r" --> " + stamp, lines[1])
+        demo_require(match, "SRT cue has an invalid timestamp")
+        values = [int(value) for value in match.groups()]
+        start, end = [((values[offset] * 60 + values[offset+1]) * 60 + values[offset+2]) * 1000 + values[offset+3]
+                      for offset in (0, 4)]
+        demo_require((not intervals or intervals[-1][1] <= start) and start < end <= round(duration * 1000) + 1,
+                     "SRT cue timing overlaps or escapes the video duration")
+        intervals.append((start, end))
+    return intervals
+
+
+def check_readme_demo(tracked):
+    """Bind published demo bytes and navigation; never grant visual/quality acceptance."""
+    errors, count = [], 0
+    try:
+        targets = {readme: demo_document_targets(readme) for readme in DEMO_READMES}
+        receipt_path = ROOT / "docs/media/composition-receipt.json"
+        if not receipt_path.exists():
+            if any(target.startswith("docs/media/") and target.lower().endswith((".mp4", ".gif"))
+                   for values in targets.values() for target in values):
+                errors.append("README demo MP4/GIF references require a published composition-receipt.json")
+            return errors, count
+        receipt = demo_json(demo_file("composition-receipt.json", tracked))
+        duration, expected_intervals = demo_video_contract(receipt)
+        expected = {"gsw-native-operation.en.mp4", "training-provenance.json"}
+        expected.update(f"gsw-native-operation.{language}.srt" for language in DEMO_READMES.values())
+        expected.update(f"gsw-native-preview.{language}.gif" for language in DEMO_READMES.values())
+        rows = receipt.get("files")
+        demo_require(isinstance(rows, list), "demo receipt file inventory must be a list")
+        count = len(rows)
+        demo_require(count == 8 and all(isinstance(row, dict) and isinstance(row.get("path"), str) for row in rows)
+                     and len({row["path"] for row in rows}) == count
+                     and {row["path"] for row in rows} == expected,
+                     "demo file path inventory must contain exactly the eight expected unique MP4/GIF/SRT/provenance files")
+        files = {}
+        for row in rows:
+            name = row["path"]
+            path = demo_file(name, tracked)
+            files[name] = path
+            if (type(row.get("bytes")) is not int or row["bytes"] <= 0 or path.stat().st_size != row["bytes"]
+                    or not isinstance(row.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])
+                    or file_sha256(path) != row["sha256"]):
+                errors.append("demo file binding mismatch: " + name)
+            with path.open("rb") as stream:
+                header = stream.read(24)
+            if name.endswith(".mp4"):
+                demo_require(len(header) >= 16 and header[4:8] == b"ftyp"
+                             and 16 <= int.from_bytes(header[:4], "big") <= path.stat().st_size,
+                             "demo MP4 type signature is invalid")
+            elif name.endswith(".gif"):
+                demo_require(len(header) >= 13 and header[:6] in (b"GIF87a", b"GIF89a")
+                             and [int.from_bytes(header[6:8], "little"), int.from_bytes(header[8:10], "little")] == [640, 448],
+                             "demo GIF type signature/dimensions are invalid: " + name)
+            elif name.endswith(".srt"):
+                demo_require(demo_srt_intervals(path, duration) == expected_intervals,
+                             "SRT timestamps differ from the shared chapter timeline: " + name)
+        for readme, language in DEMO_READMES.items():
+            required = {"docs/media/gsw-native-operation.en.mp4", "docs/media/README.md",
+                        f"docs/media/gsw-native-preview.{language}.gif", f"docs/media/gsw-native-operation.{language}.srt"}
+            missing = required - targets[readme]
+            if missing:
+                errors.append(readme + " lacks its localized demo/provenance links: " + ", ".join(sorted(missing)))
+        guide = demo_file("README.md", tracked).read_text(encoding="utf-8-sig")
+        bundle_hashes = re.findall(r"ZIP SHA256:\s*`([0-9a-f]{64})`", guide)
+        bundle = demo_file("readme-training-demo.zip", tracked)
+        demo_require(len(bundle_hashes) == 1 and file_sha256(bundle) == bundle_hashes[0],
+                     "training ZIP hash differs from the independent provenance-guide binding")
+        with zipfile.ZipFile(bundle) as archive:
+            def member(name):
+                selected = [row for row in archive.infolist() if row.filename == name]
+                demo_require(len(selected) == 1 and selected[0].file_size <= 2 * 1024 ** 2,
+                             "training ZIP metadata member is missing, duplicate or oversized: " + name)
+                return archive.read(selected[0])
+            manifest_bytes = member("demo_manifest.json")
+            manifest = json.loads(manifest_bytes.decode("utf-8-sig"))
+            demo_require(isinstance(manifest, dict) and manifest.get("schema") == "gsw.readme_training_demo/1"
+                         and manifest.get("training_provenance_path") == "training_provenance.json",
+                         "training ZIP manifest schema/provenance path is invalid")
+            provenance_bytes = member("training_provenance.json")
+        provenance = demo_json(files["training-provenance.json"])
+        inputs, identity = receipt.get("inputs"), receipt.get("source_identity")
+        demo_require(isinstance(inputs, dict) and isinstance(identity, dict), "demo source identity bindings are missing")
+        provenance_hash = hashlib.sha256(provenance_bytes).hexdigest()
+        demo_require(inputs.get("training_manifest_sha256") == hashlib.sha256(manifest_bytes).hexdigest()
+                     and inputs.get("training_provenance_sha256") == manifest.get("training_provenance_sha256") == provenance_hash
+                     and file_sha256(files["training-provenance.json"]) == provenance_hash
+                     and isinstance(inputs.get("dataset_identity"), str) and inputs["dataset_identity"]
+                     and inputs["dataset_identity"] == manifest.get("dataset_identity") == provenance.get("dataset_identity")
+                     and identity.get("training_source_commit") == provenance.get("training_source_commit")
+                     and re.fullmatch(r"[0-9a-f]{40}", str(identity.get("training_source_commit", "")))
+                     and identity.get("training_and_recording_application_are_separate_identities") is True,
+                     "training ZIP manifest/provenance/source identity differs from the composition receipt")
+        demo_require(provenance.get("schema") == "gsw.readme_training_public_provenance/1"
+                     and all(provenance.get(key) is False for key in (
+                         "quality_or_accuracy_accepted", "physical_accuracy_accepted", "full_optimizer_resume_demonstrated",
+                         "test_images_feedback_into_optimization", "truth_depth_normals_mesh_used")),
+                     "training provenance must not claim quality/physical accuracy/full-state resume acceptance")
+    except (OSError, ValueError, TypeError, OverflowError, zipfile.BadZipFile) as error:
+        errors.append("demo publication check: " + str(error))
+    return errors, count
+
+
 def check_document(relative, tracked=None):
     if tracked is None:tracked=tracked_files()
     path = ROOT / relative
@@ -303,10 +533,14 @@ def main():
     findings.extend({"path": "LICENSE", "message": error} for error in plain_license_errors((ROOT / "LICENSE").read_text(encoding="utf-8")))
     media_errors, media_count = check_readme_media(tracked)
     findings.extend({"path": "docs/images/readme/manifest.json", "message": error} for error in media_errors)
+    demo_errors, demo_count = check_readme_demo(tracked)
+    findings.extend({"path": "docs/media/composition-receipt.json", "message": error} for error in demo_errors)
     report = {"checkedMarkdownFiles": len(paths), "checkedLinkReferences": references,
               "plainTextLicenseChecked": True, "publishedTargetInventoryChecked":True, "standardGplTextReformatted": False,
               "linkedOverviewBadgesChecked": True,
               "readmeMediaFilesChecked": media_count,
+              "readmeDemoFilesChecked": demo_count,
+              "demoBindingIsNotVisualOrQualityAcceptance": True,
               "findings": findings, "passed": not findings}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

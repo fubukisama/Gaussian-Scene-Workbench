@@ -33,6 +33,16 @@
 
 [Why GSW](#why-gsw) · [Choose your starting point](#choose-your-starting-point) · [Capabilities](#capabilities) · [Get started](#get-started) · [Documentation](#documentation)
 
+## Watch it in action
+
+See random initialization become actual 3DGS / 2DGS results, followed by native camera navigation, a move with undo, and PLY export.
+
+<p align="center"><a href="docs/media/gsw-native-operation.en.mp4"><img src="docs/media/gsw-native-preview.en.gif" width="640" alt="Selected real native-operation excerpts showing actual 3DGS and 2DGS training snapshots, navigation and export"></a></p>
+
+[Full MP4 · 73 seconds](docs/media/gsw-native-operation.en.mp4) · [English subtitles](docs/media/gsw-native-operation.en.srt) · [Scene files and provenance](docs/media/README.md)
+
+<sub>Actual GPU training on original synthetic images; saved-stage replay, not live training. The full English-UI video preserves real operation speed; the GIF selects excerpts. This short demonstration is not a quality, accuracy or speed benchmark.</sub>
+
 ## A visual tour
 
 Click an image to inspect the full-size controls. These are real application screens, not mockups.

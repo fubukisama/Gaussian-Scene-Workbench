@@ -33,6 +33,16 @@
 
 [GSWの特長](#gswの特長) · [入力から選ぶ](#入力から選ぶ) · [主な機能](#主な機能) · [はじめに](#はじめに) · [ドキュメント](#ドキュメント)
 
+## 実際の操作を見る
+
+ランダム初期化から実際の 3DGS / 2DGS 学習結果へ。ネイティブ画面での視点操作、モデルの移動と取り消し、PLY 出力も確認できます。
+
+<p align="center"><a href="docs/media/gsw-native-operation.en.mp4"><img src="docs/media/gsw-native-preview.ja.gif" width="640" alt="実際の3DGS・2DGS学習スナップショット、視点操作と出力を示すネイティブ操作の抜粋"></a></p>
+
+[全編 MP4 · 73 秒](docs/media/gsw-native-operation.en.mp4) · [日本語字幕](docs/media/gsw-native-operation.ja.srt) · [シーンファイルと出所](docs/media/README.md)
+
+<sub>独自の合成画像を使って実際に GPU 学習した保存結果の再生で、リアルタイム学習ではありません。全編は英語 UI の等速操作、GIF は抜粋です。短期デモであり、品質・精度・速度のベンチマークではありません。</sub>
+
 ## 画面で見るワークフロー
 
 画像をクリックすると原寸で確認できます。コンセプト画像ではなく、実際のアプリ画面です。

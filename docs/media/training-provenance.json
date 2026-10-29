@@ -1,0 +1,147 @@
+{
+  "cases": [
+    {
+      "allocator_target_mib": 3072,
+      "backend": "3dgs",
+      "camera_audit": {
+        "camera_contract_sha256": "2ebf0315c0869421decc9a4020a11671561a6e5008f7cc87af591e2f66f29b81",
+        "full_K_locked": true,
+        "last_observed_iteration": 1500,
+        "sample_count": 1500,
+        "sample_log_sha256": "84e5eb335308d4b79340f5c03421b11c35d881d37a91abc5c8f1ee538abfbcec",
+        "split_counts": {
+          "test": 3,
+          "train": 24,
+          "val": 3
+        },
+        "train_only_optimization": true
+      },
+      "densification_requested": true,
+      "evidence_references": {
+        "backend_result_sha256": "ff0daa544023ee160151a66b631c431bf07ee877fde1aefdf04626e860c9f5af",
+        "raw_log_sha256": "df0e014a5479b9d22cd9a304b25e777079408548e6cf6d14cca610f06e35b155",
+        "raw_logs_and_optimizer_states_included": false
+      },
+      "os_gpu_hard_limit": false,
+      "passed": true,
+      "runtime": {
+        "python": "3.8.20 | packaged by conda-forge | (default, Sep 30 2024, 17:44:03) [MSC v.1929 64 bit (AMD64)]",
+        "torch": "2.0.1+cu118",
+        "torch_cuda": "11.8"
+      },
+      "timing": {
+        "clock_origin": "owned_training_log_creation",
+        "description": "Approximate retained-file write wall observation; includes process startup and I/O; not iteration-scaled, GPU-only time or a benchmark.",
+        "includes_startup_and_io": true,
+        "initialization_time_uses_retained_initial_snapshot_write": true,
+        "method": "training_log_birthtime_to_snapshot_mtime",
+        "status": "observed_approximate"
+      },
+      "whole_run_elapsed_seconds": 12.812999999994645
+    },
+    {
+      "allocator_target_mib": 3072,
+      "backend": "2dgs",
+      "camera_audit": {
+        "camera_contract_sha256": "f87abcb9f92c19d28eda3d9856afb5ffa0d5cb50575d04e9d25aec00b35aa88b",
+        "full_K_locked": true,
+        "last_observed_iteration": 1500,
+        "sample_count": 1500,
+        "sample_log_sha256": "84e5eb335308d4b79340f5c03421b11c35d881d37a91abc5c8f1ee538abfbcec",
+        "split_counts": {
+          "test": 3,
+          "train": 24,
+          "val": 3
+        },
+        "train_only_optimization": true
+      },
+      "densification_requested": true,
+      "evidence_references": {
+        "backend_result_sha256": "77f66eec9c44903f7762b83900f1cae3611708da2e4c8b390fe381fdb9367475",
+        "raw_log_sha256": "9c50352aacfeb6a54c613c1c020071649eb1da046c135aa85af6a8aeee56f3eb",
+        "raw_logs_and_optimizer_states_included": false
+      },
+      "os_gpu_hard_limit": false,
+      "passed": true,
+      "runtime": {
+        "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:38:44) [MSC v.1944 64 bit (AMD64)]",
+        "torch": "2.0.1+cu118",
+        "torch_cuda": "11.8"
+      },
+      "timing": {
+        "clock_origin": "owned_training_log_creation",
+        "description": "Approximate retained-file write wall observation; includes process startup and I/O; not iteration-scaled, GPU-only time or a benchmark.",
+        "includes_startup_and_io": true,
+        "initialization_time_uses_retained_initial_snapshot_write": true,
+        "method": "training_log_birthtime_to_snapshot_mtime",
+        "status": "observed_approximate"
+      },
+      "whole_run_elapsed_seconds": 16.281999999991967
+    }
+  ],
+  "dataset_identity": "749420e9bbc32ee8840c154bcef6cba857c0b292f6d478f6ff4cbd6b61c81a38",
+  "description": "Actual bounded native 3DGS and 2DGS optimization on original synthetic RGB; not a quality or speed benchmark.",
+  "full_optimizer_resume_demonstrated": false,
+  "initialization": {
+    "bounds": [
+      [
+        -1.5,
+        -1.5,
+        -0.18
+      ],
+      [
+        1.5,
+        1.5,
+        2.15
+      ]
+    ],
+    "count": 12000,
+    "frame": "source",
+    "kind": "random",
+    "priors": [],
+    "seed": 73129
+  },
+  "initialization_geometry_prior_used": false,
+  "original_inputs_reverified_unchanged": true,
+  "physical_accuracy_accepted": false,
+  "quality_or_accuracy_accepted": false,
+  "raw_input_manifest_sha256": "d61717d6df16292b8e0ba432558eca59337bea592971210f49f280c64c09e3fb",
+  "raw_supervisor_result_sha256": "185e26ad93300af3c7daf69096153a760d71599230dd715287c1fc9b6aeeefdc",
+  "recorder_application_binding": "Separate actual native executable/source receipt required; this bundle does not attest the recorder.",
+  "sample_rgb": {
+    "height": 320,
+    "path": "input/orbit-000.png",
+    "sha256": "51f6d4a7484a3b5336b9925051a1a9761ca1a2dd47c8903c38ed9f5832f2cce4",
+    "split": "train",
+    "view_id": "orbit-000",
+    "width": 320
+  },
+  "scale": {
+    "meters_per_unit": null,
+    "source_unit": "unknown",
+    "status": "arbitrary"
+  },
+  "schema": "gsw.readme_training_public_provenance/1",
+  "selected_hashes_are_not_complete_source_closure": true,
+  "selected_source_files_sha256": {
+    "gaussian-splatting/train.py": "c956d54645ce78e651da8c433880e790051da60395039cacc76d34aae8e78437",
+    "native/backend/camera_dataset.py": "f209a4c4aab0628ec9b150a94c7760c16310257d3d9eca204afa594452bff4de",
+    "native/backend/initialization.py": "90fbddc6b776ef774bac4b9e634ed20d98332959d389a3fa2e1fd36333c31158",
+    "native/worker/camera_rasterizer_runtime.py": "062dbfaf630a92a32bb359e06aa4aaa59ba6d009c621d0d52e097393ef029038",
+    "native/worker/canonical_training.py": "4b902fdebf0909ce368c80e55876b692868a244aec21f4549db2a06cadc2ba8c",
+    "native/worker/training_checkpoint.py": "548e6edc92e09067c773b4a4a44095b79dec4ffed5e5cc6b8efdca677359f76c",
+    "native/worker/training_density_control.py": "595a47d1d5777cd13709328fd1125472983fd7049bcf1b62acc00d86ba4ee7cd",
+    "native/worker/training_runtime.py": "fc146e3a2c228d5a37b554e85bdea08b8b1ea5cb4991c14bb3d1fd204a7a5c42",
+    "native/worker/two_dgs_train.py": "fc8f9fcf32f55531bfaa84ee16517a5e728bcc33d6b7cb3c99c00a4d14abba21",
+    "scripts/readme_demo_training.py": "fa60152844946d9d90d68e185e7c837c0d522e6f4d17c10b2f6f1a9806af9ee1"
+  },
+  "source": {
+    "generator": "gsw.readme_orbit_dataset/1",
+    "generator_sha256": "aedae93a67a153a1d4f7c49a5c1b1412f41f91a663bee6ef4ff02bdaed494d10",
+    "kind": "original_procedural_readme_demo",
+    "third_party_assets": false
+  },
+  "test_images_feedback_into_optimization": false,
+  "training_source_commit": "f9977105ee5024aa94c9b263410f84f0fed77862",
+  "truth_depth_normals_mesh_used": false
+}
