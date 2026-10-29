@@ -1,6 +1,6 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_WIRING_REPAIR_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_FIXTURE_PASS / FULL_PACKAGE_PENDING / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
 
 这不是发布许可或“全面升级完成”报告。`ACCEPTANCE_STATUS.md/.json` 继续作为旧
 `ffb8eb2` 快照保留；更早的失败、原始结果及本文前版均保存在证据目录和 Git 历史中。
@@ -30,6 +30,8 @@ Status: **FORMS_REPAIR_SUBGATE_PASS / NATIVE_175_TESTS_PASS / PUBLISHER_WIRING_R
 | 同一 run — upstream viewport | `ac5c77b` | **SUCCESS**。 | 独立子 job 的成功不消除 Qt bootstrap 失败。 |
 | 同一 run — CodeQL | `ac5c77b` | 最近交接时仍 **RUNNING**。 | 不能从旧成功推定其已完成。 |
 | [Native Windows 40801832785](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40801832785) | `9803c86` | 4个 bootstrap、**175/175 CTests PASS**（2241.71s），upstream SUCCESS；随后 managed publication 步骤 **FAIL**。CodeQL独立记录。 | 已定位为调用缺 `DeveloperPublisher` / `PythonExecutable` 两个新增必填参数，不是175测试失败。主流水线补独立开发工具构建和参数接线，修复后完整产品包回读仍待验。 |
+| [Native Managed Publication 40810209865](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40810209865) | `3e82c54` | **SUCCESS**，4分48秒；原PS适配器13项契约通过，脚本hash未变。 | 只构建启动器、快捷方式夹具和独立发布工具，未构建/启动桌面主程序；formalGswAcceptance=false，不替代真产品包。 |
+| [修复后完整Native Windows 40809641898](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40809641898) | `7f76c51` | 后台运行中；独立工具构建和两个必填参数已接线。 | 实际产品包、安装器、上传/下载字节回读及完整jobs结果仍待导入。 |
 | [历史 Forms 40743097537](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743097537) | `a5393be` | SUCCESS；34/34选定 CTests、16类192格完整。 | 正常尺寸原图后来发现3类真实缺陷；不能以 capture 完整宣称视觉通过。 |
 | [历史完整 Native Windows 40743102181](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40743102181) | `a5393be` | 当时3 jobs SUCCESS；直接日志为4 bootstrap、175 CTests、upstream 65+6及 CodeQL 通过。 | 随后便携 artifact 下载回读发现隐藏文件被过滤，不能由 staging 绿灯替代实际分发包。 |
 
@@ -206,6 +208,11 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
 
 当前 **NOT_DELIVERED**：没有生成完整接受凭证、没有调用托管 publisher，没有切换
 `current.json` 或重写快捷方式。旧运行／回滚版本、用户设置、工程、照片、模型和检查点保留。
+
+已按本任务的后台跟进要求建立当前聊天心跳`gsw-ui`：每15分钟检查一次，状态不变时静默，
+仅确认的新失败、完成或需要用户决定时通知。旧`gsw-p1`属于另一聊天且为PAUSED，未改动。
+后台权威交接位于`.planning/2026-10-28-native-ui-upgrade/BACKGROUND_HANDOFF.md`；
+跟进完成或需人类输入时停止，不归档聊天，不触发本机程序。
 
 接下来必须分别处理：
 
