@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Foundation checks icons/shell; forms also requires the sixteen dialog classes
+        description: Foundation icons/shell; forms sixteen dialogs; menu-alt is a separate synthetic Qt Alt keyboard sideprobe
         required: true
         default: forms
         type: choice
-        options: [foundation, forms]
+        options: [foundation, forms, menu-alt]
       full_icon_dpr_matrix:
         description: Capture the five declared DPR groups (core-only stays explicitly partial)
         required: true
@@ -54,6 +54,17 @@ jobs:
             runId=$env:GITHUB_RUN_ID;scope=$env:UI_SURFACE_SCOPE;fullIconDprMatrix=($env:UI_SURFACE_FULL_DPR -eq 'true');
             status='NOT_RUN';batches=@();recordedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6|
             Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            $request=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json -AsHashtable
+            $request['schema']='gsw.ui_menu_sideprobe_run/1'
+            $request['requestedFullIconDprMatrix']=$request['fullIconDprMatrix']
+            $request['fullIconDprMatrix']=$false
+            $request['entryRoute']='qt_alt'
+            $request['originalFormMatrixExecuted']=$false
+            $request['f10Acceptance']='NOT_RUN_ORIGINAL_EVIDENCE_RETAINED'
+            $request['fullAcceptance']=$false
+            $request|ConvertTo-Json -Depth 6|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          }
       - uses: actions/setup-python@v6
         id: qa-bootstrap
         with:
@@ -70,6 +81,7 @@ jobs:
           & '${{ steps.qa-bootstrap.outputs.python-path }}' -m venv $environment
           if($LASTEXITCODE -ne 0){throw 'Owned-drive QA environment creation failed.'}
           "python-path=$(Join-Path $environment 'Scripts/python.exe')" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "$(Join-Path $environment 'Scripts')" | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Validate native boundaries, translations and evidence checker contracts
         shell: pwsh
         run: |
@@ -89,6 +101,8 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
+          dir: ${{ runner.temp }}/gsw-ui-qt
+          setup-python: false
       - name: Build only the selected real-window and style targets
         id: surface-build
         shell: pwsh
@@ -110,6 +124,9 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$root/installed" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           if($LASTEXITCODE -ne 0){throw 'Focused UI configure failed.'}
           $targets=@('GaussianSceneWorkbench','gsw_process_output_fixture','gsw_app_theme_tests','gsw_ui_visual_role_tests')
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            $targets=@('GaussianSceneWorkbench')
+          }
           if($env:UI_SURFACE_SCOPE -eq 'forms'){
             $targets+=@('gsw_initialization_dialog_ui_tests','gsw_runtime_decoupling_ui_tests')
           }
@@ -125,6 +142,7 @@ jobs:
           ./scripts/setup_native_ci_display.ps1
           ./scripts/setup_native_ci_graphics.ps1
       - name: Execute original CTest contracts and collect exposed owned surfaces
+        if: ${{ inputs.scope != 'menu-alt' }}
         shell: pwsh
         env:
           UI_SURFACE_SCOPE: ${{ inputs.scope }}
@@ -192,8 +210,10 @@ jobs:
           $manifest['status']='FINISHED'
           $manifest|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
       - name: Verify dedicated menu keyboard and accessibility paths
-        if: ${{ !cancelled() && inputs.scope == 'forms' && steps.surface-build.outcome == 'success' }}
+        if: ${{ !cancelled() && (inputs.scope == 'forms' || inputs.scope == 'menu-alt') && steps.surface-build.outcome == 'success' }}
         shell: pwsh
+        env:
+          UI_SURFACE_SCOPE: ${{ inputs.scope }}
         run: |
           $ErrorActionPreference='Stop'
           $PSNativeCommandUseErrorActionPreference=$false
@@ -207,17 +227,40 @@ jobs:
           $env:QT_OPENGL='software'
           $env:QT_SCALE_FACTOR='1'
           $env:GSW_UI_SOURCE_COMMIT=$env:GITHUB_SHA
+          $entryRoute='qt_f10'
+          $receiptName='menu-keyboard-results.json'
+          $selection='^native_menu_keyboard_(zh_CN|en_US|ja_JP)$'
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            $entryRoute='qt_alt'
+            $receiptName='menu-alt-keyboard-results.json'
+            $selection='^native_menu_alt_keyboard_(zh_CN|en_US|ja_JP)$'
+            $request=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json -AsHashtable
+            $request['status']='RUNNING'
+            $request['selectedCTestRegex']=$selection
+            $request|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          }
           # Three new isolated processes, not extra work/deadlines in the
           # original requested form/icon contract or its planned batch manifest.
           ctest --test-dir native/build-ui-surfaces -C Release --parallel 1 --no-tests=error `
             --output-on-failure --verbose --output-junit "$case/ctest.xml" --output-log "$case/ctest.log" `
-            -R '^native_menu_keyboard_(zh_CN|en_US|ja_JP)$'
+            -R $selection
           $menuExit=$LASTEXITCODE
-          $files=@(Get-ChildItem -LiteralPath $root -Filter 'menu-keyboard-results.json' -Recurse -File)
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            $request=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json -AsHashtable
+            $request['status']='FINISHED'
+            $request['ctestExit']=$menuExit
+            $request|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+          }
+          $files=@(Get-ChildItem -LiteralPath $root -Filter $receiptName -Recurse -File)
           $receipts=@($files|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
           $original=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json
-          $originalCount=($original.plannedBatches|ForEach-Object {$_.tests.Count}|Measure-Object -Sum).Sum
+          $originalCount=0
+          if($env:UI_SURFACE_SCOPE -ne 'menu-alt'){
+            $originalCount=($original.plannedBatches|ForEach-Object {$_.tests.Count}|Measure-Object -Sum).Sum
+          }
           [ordered]@{schema='gsw.menu_keyboard_run/1';sourceCommit=$env:GITHUB_SHA;
+            entryRoute=$entryRoute;syntheticQtEvents=$true;physicalOrNativeOsInputClaim=$false;
+            originalF10EvidenceReclassified=$false;
             originalFormIconTests=$originalCount;additionalMenuTests=3;ctestExit=$menuExit;receiptCount=$files.Count;
             fullAcceptance=$false;applicationExecutedLocally=$false;
             receipts=@($files|ForEach-Object {@{path=[IO.Path]::GetRelativePath($root,$_.FullName).Replace('\','/');
@@ -229,16 +272,46 @@ jobs:
           }
           foreach($receipt in $receipts){
             if($receipt.sourceCommit -cne $env:GITHUB_SHA -or $receipt.status -cne 'PASS' -or
+              $receipt.entryRoute -cne $entryRoute -or
               $receipt.expectedCaseCount -ne 4 -or $receipt.cases.Count -ne 4 -or
               $receipt.publicStateUnchanged -ne $true -or $receipt.fullAcceptance -ne $false -or
               @($receipt.cases|Where-Object {$_.status -cne 'PASS'}).Count -ne 0){
               throw 'A menu path/source/state boundary is incomplete; do not convert it into full UI acceptance.'
             }
+            if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+              if($receipt.nativeOsKeyboardClaim -ne $false -or $receipt.physicalOsKeyboardClaim -ne $false -or
+                $receipt.fullAccessibilityClaim -ne $false -or $null -ne $receipt.f10Observed){
+                throw 'An Alt sideprobe cannot claim native/physical/full accessibility or F10 acceptance.'
+              }
+              foreach($path in $receipt.cases){
+                if($path.entryRoute -cne 'qt_alt' -or $null -ne $path.f10Observed -or
+                  $path.altEntryObserved -ne $true -or $path.altPressObserved -ne $true -or
+                  $path.altShortcutOverrideObserved -ne $true -or $path.altReleaseObserved -ne $true -or
+                  $path.qtKeyEventsDropped -ne 0){
+                  throw 'Alt entry requires actual passive event and natural-menu evidence, not just a PASS label.'
+                }
+              }
+            }
+          }
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            $request=Get-Content -LiteralPath "$root/source-run.json" -Raw|ConvertFrom-Json -AsHashtable
+            $request['status']='FINISHED'
+            $request['ctestExit']=$menuExit
+            $request['acceptedLocaleCount']=$receipts.Count
+            $request|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$root/source-run.json" -Encoding utf8
+            [ordered]@{schema='gsw.menu_alt_sideprobe_result/1';sourceCommit=$env:GITHUB_SHA;
+              scope='menu-alt';entryRoute='qt_alt';status='PASS';localeCount=3;menuPathCount=12;
+              originalFormMatrixExecuted=$false;fullSixteenDialogCoverage='NOT_REQUESTED';
+              visualAcceptance='NOT_RUN';f10Acceptance='NOT_RUN_ORIGINAL_EVIDENCE_RETAINED';
+              physicalOrNativeOsInputClaim=$false;fullAcceptance=$false} |
+              ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$case/sideprobe-summary.json" -Encoding utf8
           }
           exit 0
       - name: Index only test-owned PNG bytes and assess actual evidence coverage
         if: always()
         shell: pwsh
+        env:
+          UI_SURFACE_SCOPE: ${{ inputs.scope }}
         run: |
           $ErrorActionPreference='Stop'
           if(-not $env:GSW_UI_SURFACE_ROOT -or -not (Test-Path -LiteralPath "$env:GSW_UI_SURFACE_ROOT/source-run.json")){
@@ -250,6 +323,10 @@ jobs:
           })
           @{schema='gsw.ui_surface_png_index/1';sourceCommit=$env:GITHUB_SHA;images=$index}|ConvertTo-Json -Depth 5|
             Set-Content -LiteralPath "$root/png-index.json" -Encoding utf8
+          if($env:UI_SURFACE_SCOPE -eq 'menu-alt'){
+            Write-Output 'Independent synthetic Qt Alt menu sideprobe only; original form/icon/F10 and full visual acceptance are not claimed.'
+            exit 0
+          }
           & '${{ steps.qa.outputs.python-path }}' -I -B scripts/check_native_ui_surface_evidence.py `
             --root $root --source-commit $env:GITHUB_SHA `
             --inventory docs/ui_upgrade_20261028/SURFACE_INVENTORY.json --output "$root/surface-results.json"

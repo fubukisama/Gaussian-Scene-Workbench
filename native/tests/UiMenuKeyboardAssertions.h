@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QKeyEvent>
 #include <QList>
 #include <QMainWindow>
@@ -29,12 +30,14 @@
 #include <QMetaObject>
 #include <QPointer>
 #include <QSet>
+#include <QStyle>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTimer>
 
 #include <functional>
 #include <optional>
+#include <utility>
 
 namespace gsw::tests {
 
@@ -54,27 +57,96 @@ struct MenuKeyboardPathResult {
   QJsonObject evidence;
 };
 
+// Passive QA observer for the independent synthetic-Qt Alt route. It neither
+// accepts nor filters an event, and it never sends a ShortcutOverride itself.
+class MenuKeyboardEventObserver final : public QObject {
+public:
+  MenuKeyboardEventObserver(bool enabled,
+      std::function<bool(QWidget *)> isOwned,
+      std::function<QJsonObject(const QObject *)> identity)
+      : enabled_(enabled), isOwned_(std::move(isOwned)), identity_(std::move(identity)) {
+    if (enabled_) qApp->installEventFilter(this);
+  }
+  ~MenuKeyboardEventObserver() override {
+    if (enabled_ && qApp) qApp->removeEventFilter(this);
+  }
+  QJsonArray events;
+  int droppedEvents = 0;
+  bool altPressObserved = false;
+  bool altShortcutOverrideObserved = false;
+  bool altReleaseObserved = false;
+  bool helperDispatch = false;
+  int dispatchKey = 0;
+  QString dispatchPhase;
+
+protected:
+  bool eventFilter(QObject *receiver, QEvent *event) override {
+    if (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease &&
+        event->type() != QEvent::ShortcutOverride) return false;
+    auto *key = static_cast<QKeyEvent *>(event);
+    auto *widget = qobject_cast<QWidget *>(receiver);
+    const bool owned = widget && isOwned_(widget);
+    const auto modifiers = key->modifiers();
+    if (events.size() < 2048) {
+      events.append(QJsonObject{{"type", int(event->type())}, {"key", key->key()},
+          {"modifiers", int(modifiers)}, {"spontaneous", event->spontaneous()},
+          {"receiver", identity_(receiver)}, {"ownedReceiver", owned},
+          {"helperDispatch", helperDispatch}, {"dispatchKey", dispatchKey},
+          {"dispatchPhase", dispatchPhase}});
+    } else ++droppedEvents;
+    if (owned && helperDispatch && dispatchKey == Qt::Key_Alt &&
+        key->key() == Qt::Key_Alt && !event->spontaneous()) {
+      if (dispatchPhase == QStringLiteral("press")) {
+        if (event->type() == QEvent::KeyPress) altPressObserved = true;
+        if (event->type() == QEvent::ShortcutOverride && modifiers == Qt::AltModifier)
+          altShortcutOverrideObserved = true;
+      } else if (dispatchPhase == QStringLiteral("release") &&
+                 event->type() == QEvent::KeyRelease && modifiers == Qt::NoModifier) {
+        altReleaseObserved = true;
+      }
+    }
+    return false;
+  }
+
+private:
+  bool enabled_;
+  std::function<bool(QWidget *)> isOwned_;
+  std::function<QJsonObject(const QObject *)> identity_;
+};
+
 // A top-level menu followed by at most one existing submenu is enough for this
 // bounded tranche (Language, Appearance, Workflow and Help). The caller supplies
 // current locale/theme expectations and an existing public business-state
-// snapshot. A missing/uncontrollable native F10 seam remains explicit NOT_RUN;
+// snapshot. The default synthetic-Qt F10 observation remains unchanged and an
+// explicit qt_alt route is an independent additional probe, never a fallback.
+// A missing/uncontrollable F10 seam remains explicit NOT_RUN;
 // setActiveAction(), popup(), show() or direct QAction::trigger() are not fallbacks.
 inline MenuKeyboardPathResult checkMenuKeyboardPath(
     QMainWindow &ownedWindow, const QString &caseId, const QList<QMenu *> &path,
     const QList<AccessibleMenuItemExpectation> &expectations,
-    const std::function<QJsonObject()> &publicSnapshot) {
+    const std::function<QJsonObject()> &publicSnapshot,
+    const QString &entryRoute = QStringLiteral("qt_f10")) {
   MenuKeyboardPathResult result;
   auto &out = result.evidence;
   out = QJsonObject{{"schema", "gsw.menu_keyboard_path/1"},
                    {"sourceCommit", qEnvironmentVariable("GSW_UI_SOURCE_COMMIT")},
                    {"caseId", caseId}, {"platform", QApplication::platformName()},
-                   {"status", "NOT_RUN"}, {"inputKind", "actual Qt widget key events"},
+                   {"status", "NOT_RUN"}, {"inputKind", "synthetic Qt widget key events"},
+                   {"entryRoute", entryRoute}, {"nativeOsKeyboardClaim", false},
+                   {"fullAccessibilityClaim", false},
                    {"ownershipPolicy", "QObject-parent-tree-and-existing-menu-action-graph"},
                    {"physicalOsKeyboardClaim", false}, {"directActionsTriggeredByHelper", false}};
+  const bool altRoute = entryRoute == QStringLiteral("qt_alt");
+  if (altRoute) out["f10Observed"] = QJsonValue(QJsonValue::Null);
   QJsonArray errors, keys, pathRecords, itemRecords, triggeredActions, receiverChecks;
   bool missingDisabledReasonOracle = false;
   const auto fail = [&](const char *reason) { errors.append(QString::fromLatin1(reason)); };
   auto *bar = ownedWindow.findChild<QMenuBar *>();
+  const int altNavigationStyleHint = bar
+      ? bar->style()->styleHint(QStyle::SH_MenuBar_AltKeyNavigation, nullptr, bar) : -1;
+  out["altNavigationStyleHint"] = altNavigationStyleHint;
+  if (!altRoute && entryRoute != QStringLiteral("qt_f10"))
+    fail("unknown explicit menu keyboard entry route");
   const auto objectIdentity = [](const QObject *object) {
     return object ? QJsonObject{{"id", object->objectName()},
         {"class", QString::fromLatin1(object->metaObject()->className())},
@@ -136,6 +208,8 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
   if (!bar || !bar->isVisibleTo(&ownedWindow) || bar->isNativeMenuBar() || path.isEmpty() ||
       path.size() > 2 || expectations.isEmpty() || expectations.size() > 8 || !publicSnapshot)
     fail("existing Qt menu bar, one/two-menu path, independent expectations and snapshot are required");
+  if (altRoute && altNavigationStyleHint <= 0)
+    fail("the existing menu style does not enable Alt-key navigation");
   if (bar && !path.isEmpty()) {
     const bool barContainsTop = path.first() && bar->actions().contains(path.first()->menuAction());
     out["barContainsTopMenuAction"] = barContainsTop;
@@ -199,6 +273,15 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
     auto *menuWindow = qobject_cast<QMenu *>(widget->window());
     return menuWindow && reachableMenu(menuWindow);
   };
+  MenuKeyboardEventObserver keyObserver(altRoute, isOwned, objectIdentity);
+  const auto recordObservedKeys = [&] {
+    if (!altRoute) return;
+    out["qtKeyEvents"] = keyObserver.events;
+    out["qtKeyEventsDropped"] = keyObserver.droppedEvents;
+    out["altPressObserved"] = keyObserver.altPressObserved;
+    out["altShortcutOverrideObserved"] = keyObserver.altShortcutOverrideObserved;
+    out["altReleaseObserved"] = keyObserver.altReleaseObserved;
+  };
   // Observe the real actions, including dangerous actions, without invoking any.
   // Connections are scoped and always disconnected before returning.
   struct TriggerObservers {
@@ -236,15 +319,34 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
       return false;
     }
     QPointer<QWidget> target(receiver);
-    QKeyEvent press(QEvent::KeyPress, code, Qt::NoModifier);
+    // Qt 6.8.3 QKeyEvent::modifiers() XORs AltModifier for Key_Alt.
+    // QApplication::notify passes that accessor into a newly constructed
+    // ShortcutOverride (a second XOR). Thus AltModifier here makes the normal
+    // derived ShortcutOverride expose AltModifier; the press exposes NoModifier.
+    // The release also stores AltModifier so its accessor exposes NoModifier.
+    // These are explicitly synthetic Qt events, not physical/Win32 key evidence.
+    const auto constructionModifiers = code == Qt::Key_Alt ? Qt::AltModifier : Qt::NoModifier;
+    QKeyEvent press(QEvent::KeyPress, code, constructionModifiers);
+    keyObserver.helperDispatch = true;
+    keyObserver.dispatchKey = code;
+    keyObserver.dispatchPhase = QStringLiteral("press");
     QCoreApplication::sendEvent(target.data(), &press);
+    QJsonValue releaseModifiers(QJsonValue::Null);
     if (target) {
-      QKeyEvent release(QEvent::KeyRelease, code, Qt::NoModifier);
+      QKeyEvent release(QEvent::KeyRelease, code, constructionModifiers);
+      keyObserver.dispatchPhase = QStringLiteral("release");
       QCoreApplication::sendEvent(target.data(), &release);
+      releaseModifiers = int(release.modifiers());
     }
+    keyObserver.helperDispatch = false;
+    keyObserver.dispatchPhase.clear();
     ++keyCount;
     settle();
     keys.append(QJsonObject{{"key", code}, {"receiver", target ? target->objectName() : QString()},
+                            {"pressConstructionModifiers", int(constructionModifiers)},
+                            {"releaseConstructionModifiers", int(constructionModifiers)},
+                            {"pressAccessorModifiers", int(press.modifiers())},
+                            {"releaseAccessorModifiers", releaseModifiers},
                             {"topActive", actionRecord(bar->activeAction())},
                             {"popup", QApplication::activePopupWidget()
                                 ? QString::fromLatin1(QApplication::activePopupWidget()->metaObject()->className())
@@ -266,13 +368,27 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
         (path.size() == 1 || !path.last()->isVisible());
   };
 
-  const bool f10Sent = key(Qt::Key_F10);
-  const bool f10Observed = f10Sent && (bar->hasFocus() ||
-      (isOwned(QApplication::activePopupWidget()) && bar->activeAction()));
-  out["f10Observed"] = f10Observed;
-  if (!f10Observed) {
+  bool entryObserved = false;
+  if (altRoute) {
+    const bool altSent = key(Qt::Key_Alt);
+    const bool naturalBarFocus = altSent && keyObserver.altReleaseObserved && bar->hasFocus() &&
+        QApplication::focusWidget() == bar && bar->activeAction() &&
+        bar->actions().contains(bar->activeAction()) && !QApplication::activePopupWidget();
+    out["altReleaseNaturallyFocusedMenuBar"] = naturalBarFocus;
+    entryObserved = naturalBarFocus && keyObserver.altPressObserved &&
+        keyObserver.altShortcutOverrideObserved && keyObserver.droppedEvents == 0;
+    out["altEntryObserved"] = entryObserved;
+  } else {
+    const bool f10Sent = key(Qt::Key_F10);
+    const bool f10Observed = f10Sent && (bar->hasFocus() ||
+        (isOwned(QApplication::activePopupWidget()) && bar->activeAction()));
+    out["f10Observed"] = f10Observed;
+    entryObserved = f10Observed;
+  }
+  if (!entryObserved) {
     closeWithEscape();
-    out["status"] = QStringLiteral("NOT_RUN_F10_NOT_OBSERVED");
+    out["status"] = altRoute ? QStringLiteral("NOT_RUN_ALT_ENTRY_NOT_OBSERVED")
+                             : QStringLiteral("NOT_RUN_F10_NOT_OBSERVED");
     out["errors"] = errors;
     out["keys"] = keys;
     out["receiverOwnershipChecks"] = receiverChecks;
@@ -280,6 +396,7 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
     const QJsonObject after = owner ? publicSnapshot() : QJsonObject{};
     out["publicSnapshotAfter"] = after;
     out["publicStateUnchanged"] = owner && after == before;
+    recordObservedKeys();
     return result;
   }
 
@@ -376,6 +493,8 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
   if (!focusRestored) fail("ESC did not naturally return focus to the original owned control");
   if (!triggeredActions.isEmpty()) fail("menu traversal unexpectedly triggered a real action");
   if (!unchanged) fail("menu observation changed the public business-state snapshot");
+  if (altRoute && keyObserver.droppedEvents)
+    fail("passive Alt keyboard event evidence exceeded its fixed recording bound");
   out["path"] = pathRecords;
   out["items"] = itemRecords;
   out["keys"] = keys;
@@ -390,6 +509,7 @@ inline MenuKeyboardPathResult checkMenuKeyboardPath(
   out["publicStateUnchanged"] = unchanged;
   out["publicSnapshotAfter"] = after;
   out["errors"] = errors;
+  recordObservedKeys();
   result.passed = errors.isEmpty();
   out["status"] = result.passed ? QStringLiteral("PASS") : QStringLiteral("FAIL");
   return result;
@@ -403,6 +523,7 @@ inline QJsonObject menuKeyboardPublicSnapshot(QMainWindow &window) {
   auto *supervisor = window.findChild<ProcessSupervisor *>();
   auto *tasks = window.findChild<QTableWidget *>(QStringLiteral("taskRecords"));
   QJsonObject value{{"locale", AppLanguage::current()}, {"savedLocale", AppLanguage::saved()},
+                    {"qtKeyboardModifiers", int(QGuiApplication::keyboardModifiers())},
                     {"themeMode", int(AppTheme::currentThemeMode())},
                     {"theme", int(AppTheme::currentTheme())}, {"windowTitle", window.windowTitle()},
                     {"workspaceFound", bool(workspace)}, {"viewportFound", bool(viewport)},
@@ -448,6 +569,8 @@ inline bool runOwnedMenuKeyboardAcceptance(
   const QString root = qApp->property("gswUiFormEvidenceProcessRoot").toString();
   const QString base = qEnvironmentVariable("GSW_UI_SURFACE_EVIDENCE");
   const QString settings = qApp->property("gswSmokeSettingsDirectory").toString();
+  const QString requestedEntryRoute = qEnvironmentVariable("GSW_UI_MENU_ENTRY_METHOD");
+  const QString entryRoute = requestedEntryRoute.isEmpty() ? QStringLiteral("qt_f10") : requestedEntryRoute;
   if (qEnvironmentVariable("GSW_UI_MENU_KEYBOARD_ACCEPTANCE") != QStringLiteral("1") ||
       qEnvironmentVariable("GITHUB_ACTIONS") != QStringLiteral("true") ||
       QApplication::platformName() != QStringLiteral("windows") || !publicSnapshot ||
@@ -525,22 +648,32 @@ inline bool runOwnedMenuKeyboardAcceptance(
   bool accepted = true;
   for (const auto &test : cases) {
     if (!accepted) {
-      records.append(QJsonObject{{"caseId", test.id}, {"status", "NOT_RUN_PREVIOUS_CASE_NOT_ACCEPTED"}});
+      QJsonObject skipped{{"caseId", test.id}, {"status", "NOT_RUN_PREVIOUS_CASE_NOT_ACCEPTED"}};
+      if (entryRoute == QStringLiteral("qt_alt")) {
+        skipped["entryRoute"] = entryRoute;
+        skipped["f10Observed"] = QJsonValue(QJsonValue::Null);
+      }
+      records.append(skipped);
       continue;
     }
-    const auto result = checkMenuKeyboardPath(window, test.id, test.path, test.items, publicSnapshot);
+    const auto result = checkMenuKeyboardPath(window, test.id, test.path, test.items, publicSnapshot, entryRoute);
     qInfo().noquote() << "MENU_KEYBOARD_JSON" << QString::fromUtf8(QJsonDocument(result.evidence).toJson(QJsonDocument::Compact));
     records.append(result.evidence);
     accepted = result.passed;
   }
   const bool unchanged = publicSnapshot() == initial;
-  const QJsonObject receipt{{"schema", "gsw.menu_keyboard_acceptance/1"},
+  QJsonObject receipt{{"schema", "gsw.menu_keyboard_acceptance/1"},
       {"sourceCommit", qEnvironmentVariable("GSW_UI_SOURCE_COMMIT")}, {"locale", locale},
+      {"entryRoute", entryRoute}, {"inputKind", "synthetic Qt widget key events"},
+      {"physicalOsKeyboardClaim", false}, {"nativeOsKeyboardClaim", false},
+      {"fullAccessibilityClaim", false},
       {"expectedCaseCount", 4}, {"cases", records}, {"publicStateUnchanged", unchanged},
       {"normalLanguageMatrixExecuted", false}, {"newFixtureOrWorkerStarted", false},
       {"fullAcceptance", false}, {"status", accepted && unchanged ? "PASS" : "NOT_ACCEPTED"}};
+  if (entryRoute == QStringLiteral("qt_alt")) receipt["f10Observed"] = QJsonValue(QJsonValue::Null);
   const QByteArray bytes = QJsonDocument(receipt).toJson(QJsonDocument::Indented);
-  QFile file(QDir(root).filePath(QStringLiteral("menu-keyboard-results.json")));
+  QFile file(QDir(root).filePath(entryRoute == QStringLiteral("qt_alt")
+      ? QStringLiteral("menu-alt-keyboard-results.json") : QStringLiteral("menu-keyboard-results.json")));
   const bool saved = file.open(QIODevice::WriteOnly | QIODevice::NewOnly) &&
       file.write(bytes) == bytes.size() && file.flush();
   if (!saved) qCritical() << "MENU_KEYBOARD_ACCEPTANCE: unable to preserve a new source-bound receipt";
