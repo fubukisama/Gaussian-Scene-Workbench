@@ -1,6 +1,105 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **EXACT_0EC_CLOUD_SUCCESS / ALT_MENU_A11Y_FAIL / AWAITING_EXPLICIT_LONG_TASK_APPROVAL / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **EXACT_D873_MENU_CLOUD_PACKAGE_PASS / FINITE_CLOSING_COMPLETE / NOT_FULL_ACCEPTANCE / NOT_MANAGED_DELIVERY**.
+
+## 0F. 明确授权后的有界收尾完成：d873 菜单、完整 CI 和候选包通过
+
+用户对上一条明确的2–4小时收尾方案回复“继续”，本轮只处理已有菜单无障碍失败、既定菜单复验
+和一个最终候选的完整 CI／包核对，不扩大安全审计、输入框架或本机安装范围。
+
+### 两个真实红绿循环，未修改原断言
+
+官方 Qt6.8.3 的默认 MenuItem 仅提供 Name／Accelerator，不返回 Description／Help；
+原 tooltip 已有三语内容，所以追加 statusTip 属性不能修复真实接口。
+[Qt6.8.3 菜单源码](https://github.com/qt/qtbase/blob/v6.8.3/src/widgets/accessible/qaccessiblemenu.cpp#L255)
+和[公开接口注册文档](https://doc.qt.io/qt-6.8/qaccessible.html#registerAccessibleInterface)
+共同限定了最小修复：仅为指定 leaf QAction 在插入真实 QMenu 前登记公共接口适配，
+保持角色、状态、几何、父级、Qt 缓存生命周期及标准辅助激活语义。没有全局 factory、
+Qt 私有 ABI、缓存替换、全局键盘输入或测试内手动 show／focus／trigger。
+
+1. `aa09ab26ba637387f3b1049dc11492916cce2b11`／
+   [41016738223](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/41016738223)：
+   三语 language、appearance 实际 PASS，自动主题 Description 含06:00／18:00；
+   接着真实 workflow-idle FAIL，暂停／继续没有辅助禁用原因；help 因此前失败 NOT_RUN。
+   原6PASS／3FAIL／3NOT_RUN结果保留，不改成总绿。唯一 artifact12959119916（4387795 bytes）
+   SHA256 `48d0e03c6b02b5d8c70aa8a1ddff49ffc42fda9f36a40087694bd0d195688ca0`，
+   直接日志 SHA256 `8824e9bcf27bc555ef5934cfe255b1ccb0acafcac2a0c23ffa97160018b3f64d`。
+2. 最终候选 `d87343fa215389815c6cf037aef85153a5bf6b91`、tree
+   `242c92f46a967d499c08e856d543876c964d7215`，仅把同一适配用于暂停／继续，
+   从已计算的运行／恢复阻塞／续训可用状态选择说明。两条 setEnabled 条件、worker、
+   检查点和I/O逻辑未改；运行中或恢复阻塞不会被误写为“没有可用检查点”。新增两条说明
+   同步中英日并保留 PLY≠优化器续训的语义。compile-only v24／v25 exit0，
+   native_i18n 2292条 UI／2398条 catalog 全三语完整；不是本机运行验收。
+
+### 最终候选菜单：实际3个 CTests／12条路径 PASS
+
+[Native UI Surfaces41018104866](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/41018104866)
+精确 d873 最终 SUCCESS，三语言各 language／appearance／workflow-idle／help 全部 PASS。
+实际 Alt 链、名称、勾选／禁用状态、独立时间／禁用原因片段、ESC／焦点恢复及公开快照断言未放宽；
+所有路径 publicStateUnchanged=true、无触发动作。
+
+证据目录 `D:/Codex/validation/gsw-ui-upgrade-20261028/menu-final-d873-run41018104866/`；
+唯一 artifact12961210483（4369437 bytes）ZIP SHA256
+`b5a9e737a97d4805824d093d4aa3b3b97784529b83d9831add29734e22970eb1`；直接日志 SHA256
+`ead299598dd8d5b528812880e36f87b25d3565bf5da1d70b62ba772d298686ea`。
+三语 receipt SHA256：zh_CN `67311b140fb384080f42f5195338a4eebaf115f55419476d98a5ddb3f057e850`；
+en_US `5e6aad95bf93c1a86f51d787f5f4a18b42cc083d0bbba5859664669ee7f9cd77`；
+ja_JP `3481b2cf0f908834fb3efcda7d90f25b845dd4781172948f072d29466d4ca77e`。
+
+这仅是合成 Qt Alt 和真实 Qt 公共无障碍接口的范围化通过，不是物理键盘／原生 OS 读屏测试、
+F10、原34表单矩阵、完整视觉或全部无障碍通过。旧 F10 NOT_RUN 和旧失败仍保留。
+
+### 同源完整 CI／安装包：实际完成，不继承旧版本
+
+同一 d873 的唯一
+[Native Windows41018107906](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/41018107906)
+三个 job 最终均 SUCCESS（2026-10-30 08:33:30 UTC API确认），CodeQL实际1小时26分20秒。
+CodeQL直接日志 SHA256 `14d1834ffe92b9fe02e0bc98f54ac650db22da55a2874cd0bbad497cc0fb4650`。
+Qt 直接日志确认4项 bootstrap PASS（231.76秒）、175/175 CTests PASS（1583.70秒）；
+实际分发包上传后回读 PASS、baselineCompared=true，3058文件／1351后端记录／1597源码记录／28隐藏文件。
+远端主 EXE SHA256 `8d61b27177ccf3e3cdf64bbb14932a00d58017036d0c689af2c2ec4d839270e8`；
+正式 Setup SHA256 `b2e8b960b798fb93e93ff365e9d5f0809037d30eb17316790c8ad55ef0893b5c`、NotSigned。
+同源候选随后各下载一次，并完成下列本机只读核对；没有运行其中的EXE或安装器。
+upstream 直接日志另确认83项前置测试、65项真实视口与6项集中合同通过。
+Qt／upstream 日志分别保存为 `full-d873-run41018107906/qt-direct-job.log`（SHA256
+`b19e3731aca8116cdfb55d5ff61828ca9b4583bef77d31634a0c0f2af906cafb`）及
+`upstream-direct-job.log`（SHA256 `bd69ed7514ad209503adf66e2905570fa4df129fb3235c6f163399e98dad1239`）。
+不重复调度相同源码，不从旧0ec／e141／7f76继承绿灯，不将旁线独立 e141 预览改标为 d873。
+候选源码只读参考已归档于
+`D:/Codex/validation/gsw-ui-upgrade-20261028/full-d873-run41018107906/candidate-source-reference.zip`。
+
+| 实际下载对象 | artifact ID／bytes | 服务端 digest 与本机 ZIP SHA256 一致 |
+|---|---|---|
+| App及对应源码 | 12962941243／123951417 | `8aa30298aee87d6f1fe4dd7d13100df16b9c975af62125c8ed9e977a17fbbda2` |
+| 正式Setup及元数据 | 12962009568／113323360 | `b6ea39671dc780a5f0c194fbf63a45e3935da81db770266771be0848b108d77e` |
+| 远端实际回读凭证 | 12963010943／1025 | `7a44657c9997ea7f00b582603902c627659b296fc7854c82ca75cd517a5c8c3c` |
+
+本机 `verify_native_artifact.py` 和 native-only backend文件边界均 PASS：3058文件、1351后端记录、
+1597对应源码记录、28隐藏文件，EXE9862656 bytes，SHA与上方远端记录相同。
+本机无staging baseline，所以凭证明确 `baselineCompared=false`、`checkerSourceCommit=null`；
+远端真实上传／下载回读另为 `baselineCompared=true`，未混称同一次证明。
+本机静态凭证 SHA256 `29ca1c7ea0cef873958b054616dec6093c53cf2cbdb480a9df42584026ac65dd`；
+远端回读凭证 SHA256 `e633b7a1d4826a3e46c67a1b7e2e188844755e13fb1aae0f3e065eb42390fec6`。
+
+正式Setup113801452 bytes，SHA与上方记录、`.sha256`及`.exe.json`完全一致；
+元数据的主EXE SHA与App包相同，`testBuild/installerFixture/automaticAppLaunch/trainingRuntimesBundled`
+均false；三语言为zh_CN/en_US/ja_JP，实际签名仍 **NotSigned**。
+独立只读复核也确认这些字段、许可文件和新头文件。正式Setup未在本机实装，
+CI安装行为测试仍使用独立Test-AppID／test Setup，不伪称两者为相同安装器。
+
+对应源码身份不仅依赖manifest标签：真实run的head_sha/tree、三个artifact ID/digest均固定为d873，
+本机还将包内 MainWindow.cpp、新 DescribedMenuAction.h、catalog.json、CMakeLists.txt
+与冻结Git archive逐文件SHA256及Git blob比对，均相同。source-manifest、backend_manifest、
+native-crt-manifest及COPYING／native/LICENSE.md／THIRD_PARTY_LICENSES.md已逐清单核验。
+
+全部文件和绑定凭证位于
+`D:/Codex/validation/gsw-ui-upgrade-20261028/full-d873-run41018107906/`，
+最终文件凭证 `PACKAGE_BINDING_d87343f.json`。正式候选Setup位于其`setup/`子目录。
+本轮运行代码已push至main的d873，后续收尾文档提交不被冒充为重新构建／运行过的源码。
+
+本轮仍未启动本机应用／自动测试／安装器，未改 current、快捷方式、工程、照片、模型、设置或训练。
+完整66表面／29-ID、原性能 FAIL与4项 INCONCLUSIVE、硬件未验等边界保持不变；没有制造
+fullAcceptance 或本机发布许可。原293项依赖安全提示未在这次 UI 收尾中审计。
 
 ## 0E. 2026-10-30 收齐已有运行；停止后台，等待明确授权
 
@@ -373,14 +472,14 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | FORM-01 | NOT_RUN | **修复子门 PASS**：ac5 34 CTests、300 profiles、16类192格0缺项；5张新图关闭3类已知缺陷。 | 全部 popup／特殊状态／provider／嵌套提示／无障碍和全量视觉不是该子门覆盖；不宣称全192格人工审阅。 |
 | STATE-01 | NOT_RUN | 受控 task / worker / forms 旧合同及本轮公开 snapshot 保护保留。 | 空／加载／忙／失败／取消／重试／不支持的全表面具体证据仍未齐。 |
 | LOCALE-01 | NOT_RUN | 三语 catalog、安全字体、修复后导航以及 ac5 表单矩阵通过；公开参数不变。 | 全表面即时切换、长文本／混合文件名和 worker／模型状态保护仍有范围缺口。 |
-| A11Y-01 | NOT_RUN | focus inset、geometry、语义 icon 合同及按钮完整可用尺寸通过。 | 全表面 Tab / shortcut / tooltip / accessible name / disabled reason 仍未齐。 |
+| A11Y-01 | NOT_RUN | 既有focus/geometry/icon子门保留；d873三语真实Qt菜单12路径及时间／空闲禁用说明PASS。 | 合成Qt Alt不等于物理键盘／原生读屏；F10与全表面Tab/shortcut/tooltip/name/reason仍未齐。 |
 | LIFE-01 | NOT_RUN | de764 UI cache 生命周期 PASS，持久队列／取消合同未删除。 | 当前窗口／任务重连和 MainWindow 嵌套完整续训 trust prompt 不能由独立 guard 图替代。 |
 | PERF-01 | NOT_RUN | 24有效 receipts 远端归档复核完成，41比较PASS/4 INCONCLUSIVE/0新failures；原始FAIL与阈值保留。 | 4项中模型噪声仍未接受；旧数据复核不是最新源码/EXE测量或整体无回退证明。 |
 | PERF-02 | NOT_RUN | 有效空闲／独立 cache 生命周期部分通过；局部 CPU / requested GPU 上限记录存在。 | 实际 driver VRAM／GPU timing、暗色、用户 NVIDIA 等仍未测。 |
 | PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
-| PKG-01 | PASS | **7f76候选**真实产品回读、源码/EXE/Setup清单及本机静态边界核验通过，详见第0节；旧a539失败保留。 | 不向更新整合源码继承，不包含本机启动/安装、签名或完整性能接受。 |
+| PKG-01 | PASS | **d873候选**自己的App/Setup/source/清单/许可/隐藏文件、远端实际回读与本机静态核验通过（第0F节）；7f76旧接受及a539旧失败保留原身份。 | 仅文件和来源绑定，Setup未签名；不包含本机启动/安装、发布者认证或完整性能接受。 |
 | DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
-| CLOUD-01 | NOT_RUN | **7f76及a105各自完整三job SUCCESS**；旧失败和修复链保留。 | 更新整合源码仍需自己的完整结果；6bfc grid超时保留，83ab UI回归正在执行；不跨源码继承。 |
+| CLOUD-01 | PASS | **d873自己的NativeWindows三job与独立menu-alt均SUCCESS**（第0F节）；历史成功/失败保留，不跨源码继承。 | 限这两条既定流水线，不代表所有GitHub工作流；独立AutoUpdate/TLS/FIRST门、旧grid根因、硬件与完整UI仍各自保留。 |
 
 ## 8. 早期导航修复与来源边界
 
@@ -404,16 +503,17 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
 当前 **NOT_DELIVERED**：没有生成完整接受凭证、没有调用托管 publisher，没有切换
 `current.json` 或重写快捷方式。旧运行／回滚版本、用户设置、工程、照片、模型和检查点保留。
 
-已按本任务的后台跟进要求建立当前聊天心跳`gsw-ui`：每15分钟检查一次，状态不变时静默，
-仅确认的新失败、完成或需要用户决定时通知。旧`gsw-p1`属于另一聊天且为PAUSED，未改动。
+当前聊天心跳`gsw-ui`已在提出新阶段审批时删除，本次获准的有界收尾未重建心跳。
+本轮软件／候选包收尾已完成，不继续自动扩项；新的长阶段须再次明确授权。
+旧`gsw-p1`属于另一聊天且为PAUSED，未改动。
 后台权威交接位于`.planning/2026-10-28-native-ui-upgrade/BACKGROUND_HANDOFF.md`；
 跟进完成或需人类输入时停止，不归档聊天，不触发本机程序。
 
-接下来必须分别处理：
+下列是原完整升级仍需分别处理的边界，不构成本轮结束后自动继续的授权：
 
 1. 原失败二进制单次诊断已完成且未复现；保留旧失败和环境限制，不再反复复测求绿。
-2. 7f76发布接线、完整CI和实际产品包核对已完成；继续检查后续startup-health/update-engine整合候选的独立CI与包身份，
-   不把已接受的历史候选改标成最新HEAD，不重新下载已有完整证据。
+2. 7f76旧接受与d873本轮完整CI、实际产品包核对均已完成，保留各自来源；后续新运行源码必须使用自己的独立证据，
+   不把旧候选改标成最新HEAD，不重复已完成的下载或调度。
 3. 完成尚未签收的表面、视觉、无障碍及 provider／硬件／OS支持边界；已通过的16类矩阵
    和3处修复不再写成待导入，也不扩张为全部UI完成。
 4. 旧 performance receipts 远端复核已完成（第0A节），不重复计时或扩大预算；中模型4项仍独立INCONCLUSIVE，
