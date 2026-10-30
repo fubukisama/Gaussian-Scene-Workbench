@@ -2010,8 +2010,8 @@ void MainWindow::createMenus() {
   workflowMenu->addAction(mReconstructAction);
   workflowMenu->addAction(mTrainAction);
   workflowMenu->addAction(mGenerateMeshAction);
-  workflowMenu->addAction(mPauseTrainingAction);
-  workflowMenu->addAction(mResumeTrainingAction);
+  addDescribedMenuAction(workflowMenu, mPauseTrainingAction);
+  addDescribedMenuAction(workflowMenu, mResumeTrainingAction);
   workflowMenu->addAction(mGenerationHistoryAction);
   workflowMenu->addAction(mExistingTrainingAction);
   auto *qualityComparison = AppLanguage::text(workflowMenu->addAction(
@@ -7030,6 +7030,9 @@ void MainWindow::updateTrainingActions() {
       (mPendingTraining->backend == QStringLiteral("3dgs") ||
        mPendingTraining->backend == QStringLiteral("2dgs")) && mLastWorkerStatus &&
       mLastWorkerStatus->stage == QStringLiteral("train"))) && !mProcessSupervisor.wasStopRequested());
+  AppLanguage::bind(mPauseTrainingAction, "toolTip", running
+      ? AppLanguage::source("保存完整训练状态后暂停并释放显存（3DGS / 2DGS 训练阶段）")
+      : AppLanguage::source("没有正在运行的训练；开始训练后才能请求暂停。"));
   const auto active = !running && mWorkspace.hasProject()
       ? loadActiveTrainingJob(mWorkspace.rootPath()) : ActiveTrainingJob{};
   bool resumable = QFileInfo::exists(active.configurationPath) && nativeResumeIteration(active.outputSceneRoot) > 0;
@@ -7042,6 +7045,9 @@ void MainWindow::updateTrainingActions() {
     }
   }
   mResumeTrainingAction->setEnabled(!running && !mRecoveryBlocked && resumable);
+  AppLanguage::bind(mResumeTrainingAction, "toolTip", !running && !mRecoveryBlocked && !resumable
+      ? AppLanguage::source("没有可用的完整训练检查点；PLY 预览不能恢复优化器状态。")
+      : AppLanguage::source("从当前工程的完整训练检查点继续，保留优化器与迭代进度"));
 }
 
 void MainWindow::pauseTraining() {

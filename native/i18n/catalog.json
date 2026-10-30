@@ -7516,6 +7516,8 @@
   "清除历史": {"zh_CN":"清除历史","en_US":"Clear History","ja_JP":"履歴を消去"},
   "清除常用文件夹和文件记录？不会删除或修改任何文件。": {"zh_CN":"清除常用文件夹和文件记录？不会删除或修改任何文件。","en_US":"Clear the frequent folder and file history? No files will be deleted or modified.","ja_JP":"よく使うフォルダーとファイルの履歴を消去しますか？ファイルは削除・変更されません。"},
   "仅清除文件窗口历史，不删除或修改文件。": {"zh_CN":"仅清除文件窗口历史，不删除或修改文件。","en_US":"Clear only file dialog history; do not delete or modify files.","ja_JP":"ファイルダイアログの履歴のみを消去します。ファイルは削除・変更されません。"},
+  "没有正在运行的训练；开始训练后才能请求暂停。": {"zh_CN":"没有正在运行的训练；开始训练后才能请求暂停。","en_US":"No training is running. Start training before requesting a pause.","ja_JP":"実行中の学習はありません。学習を開始してから一時停止を要求してください。"},
+  "没有可用的完整训练检查点；PLY 预览不能恢复优化器状态。": {"zh_CN":"没有可用的完整训练检查点；PLY 预览不能恢复优化器状态。","en_US":"No complete training checkpoint is available. A PLY preview cannot restore optimizer state.","ja_JP":"利用可能な完全な学習チェックポイントがありません。PLY プレビューからオプティマイザーの状態を復元することはできません。"},
   "缩放到光标": {"zh_CN":"缩放到光标","en_US":"Zoom to Cursor","ja_JP":"カーソル位置へズーム"},
   "滚轮围绕光标在视点目标平面上的位置缩放；关闭后围绕视图中心缩放。立即生效并记住选择，不修改模型坐标。": {"zh_CN":"滚轮围绕光标在视点目标平面上的位置缩放；关闭后围绕视图中心缩放。立即生效并记住选择，不修改模型坐标。","en_US":"The wheel zooms around the cursor on the view-target plane; when off, zoom around the view center. Applies immediately and remembers your choice without changing model coordinates.","ja_JP":"ホイールは注視点を通る平面上のカーソル位置を基準にズームします。無効にするとビューの中心を基準にします。即時に反映して選択を保存し、モデル座標は変更しません。"},
   "<b>Gaussian Splatting Workbench %1 Native Preview</b><br>高斯场景研究工作台<br><br>Qt 6 原生桌面架构，构建日期 %2。<br>原生主程序：GPL-3.0-or-later；不提供任何担保。<br>Blender 操作柄几何保留原始 GPL 版权声明。<br>第三方训练组件保留各自许可。完整许可见安装目录 COPYING 和 native/LICENSE.md。<br>对应源码及构建材料随安装包提供于 source 目录。": {
