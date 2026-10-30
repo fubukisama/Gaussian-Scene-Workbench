@@ -9,6 +9,7 @@
 | Guide | Summary · <span lang="zh-CN">简介</span> · <span lang="ja">概要 </span>|
 | --- | --- |
 | [Download & install](../README_RELEASE.md) | Preview installer, requirements and update status · <span lang="zh-CN">预览版获取与环境</span> · <span lang="ja">入手と必要環境 </span>|
+| [Changelog](../CHANGELOG.md) · <span lang="zh-CN">[更新日志](../CHANGELOG.zh-CN.md)</span> · <span lang="ja">[変更履歴](../CHANGELOG.ja.md)</span> | Dated changes and source references, separate from release and installation acceptance · <span lang="zh-CN">按日期记录变更与源码，不混淆发布和安装验收</span> · <span lang="ja">日付別の変更とソース参照。公開・導入の検収とは区別 </span>|
 | [Native desktop build](../native/README.md) | Source build and implementation details · <span lang="zh-CN">源码构建</span> · <span lang="ja">ビルド </span>|
 | [Windows runtime](WINDOWS_NATIVE_RUNTIME.md) | External reconstruction/training environments · <span lang="zh-CN">外部运行库</span> · <span lang="ja">外部実行環境 </span>|
 | [Supported pipelines](GENERATION_PIPELINES.md) | Available routes, backend requirements and limitations · <span lang="zh-CN">管线支持矩阵</span> · <span lang="ja">対応表 </span>|

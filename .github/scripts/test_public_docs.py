@@ -1,4 +1,4 @@
-"""Remote regression checks for overview and demo-publication guards."""
+"""Remote regression checks for overview, changelog and demo-publication guards."""
 from pathlib import Path
 import hashlib
 import json
@@ -72,6 +72,102 @@ class OverviewChecks(unittest.TestCase):
             errors, count = docs.check_readme_media(self.tracked)
         self.assertEqual(count, 15)
         self.assertTrue(any("file binding mismatch" in error for error in errors))
+
+
+class ChangelogChecks(unittest.TestCase):
+    def setUp(self):
+        workspace = tempfile.TemporaryDirectory(prefix=".docs-changelog-fixture-", dir=docs.ROOT)
+        self.addCleanup(workspace.cleanup)
+        self.root = Path(workspace.name)
+        self.tracked = set(docs.CHANGELOG_PAGES)
+        self.sources = {}
+        for relative, language in docs.CHANGELOG_PAGES.items():
+            self.sources[relative] = (
+                f'<div lang="{language}">\n\n# History\n\n'
+                '[English](CHANGELOG.md) · [简体中文](CHANGELOG.zh-CN.md) · [日本語](CHANGELOG.ja.md)\n\n'
+                '## 2026-10-30\n\n- Changed example. '
+                '[Source](https://github.com/example/workbench/commit/' + '1' * 40 + ')\n\n'
+                '## 2026-10-29\n\n- Fixed example. '
+                '[Source](https://github.com/example/workbench/commit/' + '2' * 40 + ')\n\n</div>\n'
+            )
+            self.write(relative, self.sources[relative])
+        localized_history = {language: relative for relative, language in docs.CHANGELOG_PAGES.items()}
+        for overview, language in docs.LANGUAGE_PAGES.items():
+            self.tracked.add(overview)
+            self.sources[overview] = '<a href="' + localized_history[language] + '">History</a>\n'
+            self.write(overview, self.sources[overview])
+
+    def write(self, relative, text):
+        (self.root / relative).write_text(text, encoding="utf-8")
+
+    def findings(self):
+        with patch.object(docs, "ROOT", self.root):
+            return docs.check_changelogs(self.tracked)[0]
+
+    def test_aligned_three_language_history(self):
+        self.assertEqual(self.findings(), [])
+        self.assertTrue(set(docs.CHANGELOG_PAGES).issubset(docs.PRIMARY))
+
+    def test_missing_or_unpublished_locale_is_rejected(self):
+        relative = "CHANGELOG.ja.md"
+        (self.root / relative).unlink()
+        self.assertTrue(any("missing or unpublished" in item["message"] for item in self.findings()))
+        self.write(relative, self.sources[relative])
+        self.tracked.remove(relative)
+        self.assertTrue(any("missing or unpublished" in item["message"] for item in self.findings()))
+
+    def test_locale_marker_must_match_the_document(self):
+        relative = "CHANGELOG.zh-CN.md"
+        self.write(relative, self.sources[relative].replace('lang="zh-CN"', 'lang="en"'))
+        self.assertTrue(any("document-language container" in item["message"] for item in self.findings()))
+
+    def test_language_navigation_cannot_disappear_or_exist_only_in_an_example(self):
+        relative = "CHANGELOG.md"
+        navigation = "[日本語](CHANGELOG.ja.md)"
+        for replacement in ("日本語", "`" + navigation + "`", "<!-- " + navigation + " -->",
+                            "\n```markdown\n" + navigation + "\n```\n"):
+            with self.subTest(replacement=replacement):
+                self.write(relative, self.sources[relative].replace(navigation, replacement))
+                self.assertTrue(any("language navigation is incomplete" in item["message"] for item in self.findings()))
+
+    def test_each_locale_requires_matching_date_coverage(self):
+        relative = "CHANGELOG.ja.md"
+        self.write(relative, self.sources[relative].replace("## 2026-10-29", "## 2026-10-28"))
+        self.assertTrue(any("date/source-reference coverage" in item["message"] for item in self.findings()))
+
+    def test_dates_cannot_be_empty_duplicated_or_oldest_first(self):
+        relative = "CHANGELOG.md"
+        for source in (
+            self.sources[relative].replace("## 2026-10-30", "## Updated").replace("## 2026-10-29", "## Earlier"),
+            self.sources[relative].replace("## 2026-10-29", "## 2026-10-30"),
+            self.sources[relative].replace("## 2026-10-30", "## 2026-10-28"),
+        ):
+            with self.subTest(source=source):
+                self.write(relative, source)
+                self.assertTrue(any("nonempty, unique and newest first" in item["message"] for item in self.findings()))
+
+    def test_source_references_are_compared_per_date_not_just_as_a_global_set(self):
+        relative = "CHANGELOG.zh-CN.md"
+        source = self.sources[relative].replace("1" * 40, "3" * 40).replace("2" * 40, "1" * 40).replace("3" * 40, "2" * 40)
+        self.write(relative, source)
+        self.assertTrue(any("date/source-reference coverage" in item["message"] for item in self.findings()))
+
+    def test_all_locales_cannot_agree_on_history_without_source_references(self):
+        for relative in docs.CHANGELOG_PAGES:
+            self.write(relative, self.sources[relative].replace("1" * 40, "short").replace("2" * 40, "short"))
+        self.assertTrue(any("requires at least one full source-commit reference" in item["message"]
+                            for item in self.findings()))
+
+    def test_each_overview_requires_a_real_localized_history_entry_point(self):
+        for overview in docs.LANGUAGE_PAGES:
+            original = self.sources[overview]
+            for replacement in ("History", "`" + original.strip() + "`", "<!-- " + original.strip() + " -->",
+                                "```html\n" + original + "```\n"):
+                with self.subTest(overview=overview, replacement=replacement):
+                    self.write(overview, replacement)
+                    self.assertTrue(any(item["path"] == overview and "visible link to its localized changelog" in item["message"]
+                                        for item in self.findings()))
+            self.write(overview, original)
 
 
 class DemoMediaChecks(unittest.TestCase):

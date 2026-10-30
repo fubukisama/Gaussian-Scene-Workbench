@@ -31,6 +31,8 @@ GitHub may require sign-in for artifact downloads, and artifacts expire. A sourc
 
 ### Updating
 
+Read the [changelog](CHANGELOG.md) for dated changes and their source references. A changelog entry records development; it does not by itself mean a public release or an installed update.
+
 Managed installations use one stable native launcher and verified version slots. Development builds include a **Help → Software Updates** interface; online checks and downloads require a compatible trusted bootstrap and a configured signed update source. This guide does not announce a publicly deployed update channel. Use the verified download route above unless your distribution explicitly supplies one. See [managed updates](docs/NATIVE_UPDATES.md) for publication, migration and rollback; keep old versions and running sessions intact.
 
 Portable artifacts are separate from Setup and may carry a legacy version in the artifact name. Check `build_manifest.json` and the accepted commit rather than inferring the product version from that label. A downloaded portable artifact must pass its complete file manifests before use; if anything is missing, use a verified Setup or rebuild a complete package—do not disable the check.
@@ -62,6 +64,8 @@ Portable artifacts are separate from Setup and may carry a legacy version in the
 
 ### 更新方式
 
+按日期整理的变更与源码参见[更新日志](CHANGELOG.zh-CN.md)。日志条目记录开发变更，本身不表示已公开发布或已安装更新。
+
 托管安装使用固定原生启动器和经过校验的版本目录。开发版已接入**帮助 → 软件更新**界面；联网检查和下载需要兼容的可信引导组件及已配置的签名更新源。本指南不表示已开放公共更新通道；除非所用发行版明确提供该服务，否则仍按上方已验下载路线获取程序。[更新说明](docs/NATIVE_UPDATES.md)记录了发布、迁移和回退流程；保留旧版，不中断运行中的会话。
 
 便携附件与 Setup 是两种产物，附件名称可能仍含旧版本号。以 `build_manifest.json` 和已验提交确认身份，不凭附件标签判断版本。便携包必须通过完整文件清单校验；缺文件时改用已验 Setup 或重新构建完整包，不能关闭校验后继续使用。
@@ -92,6 +96,8 @@ Actions 添付の取得には GitHub サインインが必要な場合があり�
 - **安全性：**プレビューSetupは未署名の場合があります。承認された署名・実行ポリシーを使い、Windowsの保護を無効にしないでください。
 
 ### 更新
+
+日付別の変更とソース参照は[変更履歴](CHANGELOG.ja.md)を参照してください。履歴への記載だけで、一般公開やインストール済みの更新を意味するものではありません。
 
 管理方式では固定ネイティブランチャーと検証済みバージョンを使います。開発版には**ヘルプ → ソフトウェア更新**の画面がありますが、オンライン確認・ダウンロードには互換性のある信頼済みブートストラップと、設定済みの署名付き更新元が必要です。本ガイドは一般公開の更新チャンネルの提供を意味しません。利用する配布版が明示的に提供しない限り、上記の検証済み入手経路を使用してください。[更新手順](docs/NATIVE_UPDATES.md)に従い、旧版と起動中のセッションを保持してください。
 

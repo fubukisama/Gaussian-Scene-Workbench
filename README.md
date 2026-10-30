@@ -23,6 +23,7 @@
 <p align="center">
   <a href="README_RELEASE.md"><strong>Get the Windows preview</strong></a> ·
   <a href="docs/README.md">Documentation</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="native/README.md">Build from source</a> ·
   <a href="https://github.com/fubukisama/Gaussian-Scene-Workbench/issues">Report a bug</a>
 </p>

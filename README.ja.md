@@ -23,6 +23,7 @@
 <p align="center">
   <a href="README_RELEASE.md#日本語"><strong>Windows プレビューを入手</strong></a> ·
   <a href="docs/README.md">ドキュメント</a> ·
+  <a href="CHANGELOG.ja.md">変更履歴</a> ·
   <a href="native/README.md">ソースからビルド</a> ·
   <a href="https://github.com/fubukisama/Gaussian-Scene-Workbench/issues">不具合を報告</a>
 </p>

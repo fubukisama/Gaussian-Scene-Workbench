@@ -20,10 +20,12 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 PRIMARY = (
     "README.md", "README.zh-CN.md", "README.ja.md", "README_RELEASE.md",
+    "CHANGELOG.md", "CHANGELOG.zh-CN.md", "CHANGELOG.ja.md",
     "native/README.md", "native/LICENSE.md", "docs/README.md",
     "docs/LICENSING.md", "docs/images/README.md", "docs/media/README.md",
 )
 LANGUAGE_PAGES = {"README.md": "en", "README.zh-CN.md": "zh-CN", "README.ja.md": "ja"}
+CHANGELOG_PAGES = {"CHANGELOG.md": "en", "CHANGELOG.zh-CN.md": "zh-CN", "CHANGELOG.ja.md": "ja"}
 OVERVIEW_BADGE_TARGETS = {
     "README.md": ("download-the-preview", "before-you-start"),
     "README.zh-CN.md": ("下载预览版", "使用前确认"),
@@ -413,6 +415,8 @@ def check_document(relative, tracked=None):
     if tracked is None:tracked=tracked_files()
     path = ROOT / relative
     errors = []
+    if not path.is_file():
+        return ["required public document is missing"], 0
     text = path.read_text(encoding="utf-8-sig")
     if "\ufffd" in text:
         errors.append("replacement character in UTF-8 text")
@@ -518,6 +522,60 @@ def check_document(relative, tracked=None):
     return errors, len(links)
 
 
+def check_changelogs(tracked):
+    """Keep restored user-facing history visible and aligned across locales.
+
+    This checks structure/source references, not translation quality, release
+    acceptance or whether an arbitrary code commit changes user-visible behavior.
+    """
+    findings = []
+    inventories = {}
+    for relative, language in CHANGELOG_PAGES.items():
+        def error(message):
+            findings.append({"path": relative, "message": message})
+        path = ROOT / relative
+        if relative not in tracked or not path.is_file():
+            error("required localized changelog is missing or unpublished")
+            continue
+        text = path.read_text(encoding="utf-8-sig")
+        if not re.match(r'\s*<div lang="' + re.escape(language) + r'">', text):
+            error("localized changelog has no matching document-language container")
+        clean = "\n".join(without_fences(text, []))
+        clean = re.sub(r"<!--.*?-->", "", clean, flags=re.S)
+        clean = re.sub(r"(`+).*?\1", "", clean, flags=re.S)
+        targets = demo_document_targets(relative)
+        missing = sorted(set(CHANGELOG_PAGES) - targets)
+        if missing:
+            error("changelog language navigation is incomplete: " + ", ".join(missing))
+        sections = list(re.finditer(r"^##\s+(\d{4}-\d{2}-\d{2})(?=\s|$).*?$", clean, re.M))
+        dates = [match[1] for match in sections]
+        if not dates or dates != sorted(set(dates), reverse=True):
+            error("changelog dates must be nonempty, unique and newest first")
+        entries = []
+        for index, match in enumerate(sections):
+            end = sections[index + 1].start() if index + 1 < len(sections) else len(clean)
+            source_refs = sorted(set(re.findall(
+                r"https://github\.com/[^/\s)<>]+/[^/\s)<>]+/commit/([0-9a-f]{40})(?=[\s)<>#?]|$)",
+                clean[match.end():end])))
+            if not source_refs:
+                error("changelog date requires at least one full source-commit reference: " + match[1])
+            entries.append((match[1], source_refs))
+        inventories[relative] = entries
+    baseline = inventories.get("CHANGELOG.md")
+    if baseline is not None:
+        for relative, entries in inventories.items():
+            if entries != baseline:
+                findings.append({"path": relative,
+                                 "message": "changelog date/source-reference coverage differs from English"})
+    localized_history = {language: relative for relative, language in CHANGELOG_PAGES.items()}
+    for overview, language in LANGUAGE_PAGES.items():
+        if (overview not in tracked or not (ROOT / overview).is_file() or
+                localized_history[language] not in demo_document_targets(overview)):
+            findings.append({"path": overview,
+                             "message": "overview requires a visible link to its localized changelog"})
+    return findings, len(inventories)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path)
@@ -535,12 +593,16 @@ def main():
     findings.extend({"path": "docs/images/readme/manifest.json", "message": error} for error in media_errors)
     demo_errors, demo_count = check_readme_demo(tracked)
     findings.extend({"path": "docs/media/composition-receipt.json", "message": error} for error in demo_errors)
+    changelog_errors, changelog_count = check_changelogs(tracked)
+    findings.extend(changelog_errors)
     report = {"checkedMarkdownFiles": len(paths), "checkedLinkReferences": references,
               "plainTextLicenseChecked": True, "publishedTargetInventoryChecked":True, "standardGplTextReformatted": False,
               "linkedOverviewBadgesChecked": True,
               "readmeMediaFilesChecked": media_count,
               "readmeDemoFilesChecked": demo_count,
               "demoBindingIsNotVisualOrQualityAcceptance": True,
+              "localizedChangelogsChecked": changelog_count,
+              "changelogCoverageIsNotReleaseAcceptance": True,
               "findings": findings, "passed": not findings}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
