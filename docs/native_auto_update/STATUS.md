@@ -1,13 +1,21 @@
 # Auto-update delivery status
 
-Status is intentionally split: implementation, isolated acceptance, local
-delivery and public online operation. None is complete yet. On 2026-10-29 the
-user selected **isolated acceptance and a local research preview; public
-automatic updates remain disabled**. This does not authorize production keys,
-secrets, public candidate uploads or channel promotion.
+Status is intentionally split: whole-updater implementation, full isolated
+acceptance, local managed delivery and public online operation remain incomplete.
+On 2026-10-30 the user explicitly selected a narrower closeout: an independent
+e141 research-preview file bundle, without completing the whole updater. That
+file-only preview is now assembled and verified; it is not managed activation,
+fullAcceptance, a public release or production signing/channel authority.
+
+预览文件包已完成；公开自动更新仍关闭，现有安装和快捷方式未切换。
+独立プレビューファイルは完成しました。公開自動更新は無効で、既存環境は切り替えていません。
+See the [three-language preview handoff](PREVIEW_E141_20261030.md) for exact
+source, archive digest, local readback and unfinished gates.
 
 | Evidence | Exact source | Result | Scope |
 | --- | --- | --- | --- |
+| [e141 exact-source preview](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529308) / [Engine/2](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529279) | `e141f382cbedab53c8ea62e7ba9f8ea0e99c4094` | Native Windows all3jobs succeed, including175/175CTest; official disabled Engine/2, Security40840529288 and Installer40840529338 succeed. Provider-digest-bound App+Engine files are independently merged/read back:33660files,16092canonical source files. ZIP550800277B / SHA c28456b9a749abf6161b3fcd16aa7bc50f716aca99a6852b3e552ae3b8fab884 | preview files only; NOT_CONFIGURED, no local payload execution or existing installation/shortcut mutation |
+| [e141 remaining updater boundary](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840529315) | `e141f382cbedab53c8ea62e7ba9f8ea0e99c4094` | 8of10jobs pass. Actual latest-health identity-CAS, signed recovery chooser/three languages and2rollback permission/sharing cases now pass. Automatic UI still reports download_tls_failed; restricted first-bootstrap still exits0xC0000142 before main | overall updater workflow FAIL, retained unchanged; no complete updater/first-install/migration/GPU-resume claim |
 | [First contracts](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40656542985) | `78579110cd54d533f7ff4c9f50eae54fe71b769e` | Expected RED: real HTTPS returns `download_not_implemented`; archive/gate CLIs not yet present | isolated, Windows Server2022, Qt6.8.3, Python3.12 |
 | [Activation RED](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40658445549) | `9cc904a2a7576b93d31fe14f76a6aa1670013631` | `activation_not_implemented` asserted on the actual native call | isolated |
 | [First download/archive/gate GREEN](https://github.com/fubukisama/Gaussian-Scene-Workbench/actions/runs/40658378285) | `547b2378f52c12241fbf48b99d4f469f9813dccb` | HTTPS succeeds; hidden source archive and unapproved-policy refusal pass; activation still RED | isolated |
@@ -45,13 +53,14 @@ launcher/helper, but its scope is explicitly not the formal GSW renderer or
 3DGS/2DGS full optimizer-state training acceptance. No such quality or backend
 claim is inferred from a lifecycle or UI test.
 
-Applicable isolated gaps remain separate from public authorization: independent
-recovery UI, authenticated test-only first-install/bootstrap migration, actual
-cross-process contention and kill-at-extract/slot/pointer recovery, ACL/occupied/
-insufficient-space failures, and overlapping old application/owned worker/queue
-during publication. Existing component success is not completion of these packet
-contracts. A fresh local research-preview file bundle is not DEL-01 managed
-delivery and does not upgrade existing current/shortcut entry points.
+Applicable isolated gaps remain separate from public authorization: authenticated
+first-install/bootstrap migration, automatic TLS/prepare/apply and interrupted
+prepared-state restart recovery, concurrent capacity loss, permanently hung-helper
+close and remaining full matrices. Real contention/termination, bounded resource
+cases, Qt/CPU continuity and the test-root recovery chooser have scoped GREEN
+evidence; they do not establish formal GSW/GPU optimizer acceptance. The completed
+research-preview file bundle is not DEL-01 managed delivery and does not upgrade
+existing current/shortcut entry points.
 
 Production is not configured: no production root, approved complete release
 policy, protected signing environment or public channel promotion. Ordinary
