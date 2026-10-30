@@ -37,7 +37,8 @@ struct NativeLaunchPlan final {
 [[nodiscard]] QString nativeRecoveryInstallationForApplication(const QString &applicationPath);
 [[nodiscard]] QString nativeInstallationErrorText(const QString &code);
 [[nodiscard]] QString managedInstallationForApplication(const QString &applicationPath);
-// Ensures pinning the running version keeps pointing to the stable launcher.
+// Pinning keeps the stable launch command/icon/ID, while display resource 201
+// belongs to the running application, even with a retained pre-rename bootstrap.
 [[nodiscard]] bool setManagedTaskbarRelaunch(void *windowHandle,
                                           const QString &applicationPath,
                                           const QString &appUserModelId);

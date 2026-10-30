@@ -138,6 +138,39 @@ protocol migration remains a separate verified deployment.
 では読取り専用の検証 helper のみを実行し、アプリや GUI は起動しません。
 ブートストラップのプロトコル移行は引き続き別途の検証・配備が必要です。
 
+## Display-name compatibility / 显示名称兼容 / 表示名の互換性
+
+产品显示名称为 **Gaussian Splatting Workbench**。运行中的主程序从自己的不可变版本
+EXE 读取任务栏名称资源（201）；重新启动命令和图标仍使用固定启动器，应用标识不变。
+即使固定启动器来自改名前的版本，或活动指针已切到另一版本，运行中的新版也不会
+重新写回旧启动器的显示名称。不为改名覆盖 bootstrap、搬迁安装或改变工程／设置身份。
+旧 EXE 文件名、协议字段和 AppID 是兼容标识，不等于用户可见名称。
+已有快捷方式的显式名称修复须先备份，保留目标、参数、工作目录、图标、热键和显示状态；
+任务栏固定记录的路径不重命名，不取消／重新固定，不强制重启 Explorer。Windows 现有
+缓存的即时视觉刷新不由文件级核验保证。
+
+The display brand is **Gaussian Splatting Workbench**. A running application's taskbar
+name resource (201) belongs to its own immutable version executable. Relaunch commands,
+icons and AppID retain the stable launcher and existing identity. A pre-rename bootstrap,
+or a current pointer that has moved to another slot, cannot restore that bootstrap's old
+name on a newly branded running version. Renaming never overwrites the bootstrap,
+relocates the installation or changes project/settings identities. Legacy executable
+filenames and protocol identifiers are compatibility data, not display labels. Explicit
+existing-shortcut label repair backs up links and retains target, arguments, working
+directory, icon, hotkey and show state. Keep pinned-taskbar link paths, do not unpin/repin
+or restart Explorer. File-level readback does not prove immediate visual cache refresh.
+
+製品の表示名は **Gaussian Splatting Workbench** です。起動中アプリのタスクバー表示名
+リソース（201）は、そのアプリ自身の不変バージョン EXE から読み取ります。再起動コマンド・
+アイコン・AppID は固定ランチャーと既存の識別情報を維持します。改名前のランチャーが
+残っていても、現在の起動先が別バージョンに切り替わっていても、新名称の実行中アプリが
+旧ランチャーの表示名を書き戻すことはありません。改名のために bootstrap を上書きしたり、
+導入先・プロジェクト・設定の識別情報を変更したりしません。旧 EXE 名やプロトコルの
+識別子は互換性データであり、画面表示名ではありません。既存ショートカットの明示的な
+表示名修復では先にバックアップし、起動先・引数・作業先・アイコン・ホットキー・表示状態を
+保持します。固定タスクバーのリンクパスは変更せず、再固定や Explorer の再起動も行いません。
+ファイルの読戻しだけで既存キャッシュの即時表示更新を保証することはできません。
+
 ## Publisher commands / 发布命令 / 発行コマンド
 
 开发 CLI 使用稳定的机器 JSON 代码，不本地化。开发工具仅接纳本地未签名包，

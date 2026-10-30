@@ -347,6 +347,7 @@ bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPat
   IPropertyStore *store = nullptr;
   if (FAILED(SHGetPropertyStoreForWindow(static_cast<HWND>(windowHandle), IID_PPV_ARGS(&store)))) return false;
   const QString launcher = QDir::toNativeSeparators(launcherFor(root));
+  const QString displayApplication = QDir::toNativeSeparators(applicationPath);
   const auto set = [&](REFPROPERTYKEY key, const QString &value) {
     PROPVARIANT variant;
     PropVariantInit(&variant);
@@ -355,10 +356,13 @@ bool setManagedTaskbarRelaunch(void *windowHandle, const QString &applicationPat
     PropVariantClear(&variant);
     return SUCCEEDED(status);
   };
+  // Display branding belongs to the running immutable application, not the
+  // retained bootstrap (which may predate a rename). Only the launch command
+  // and icon use the stable entry; never migrate settings/AppID for a label.
   // Microsoft requires explicit window ID and both relaunch properties.
   // The taskbar reacts to the ID update; publish the relaunch values first.
   const bool good = set(PKEY_AppUserModel_RelaunchCommand, QLatin1Char('"') + launcher + QLatin1Char('"')) &&
-      set(PKEY_AppUserModel_RelaunchDisplayNameResource, QLatin1Char('@') + launcher + QStringLiteral(",-201")) &&
+      set(PKEY_AppUserModel_RelaunchDisplayNameResource, QLatin1Char('@') + displayApplication + QStringLiteral(",-201")) &&
       set(PKEY_AppUserModel_RelaunchIconResource, launcher + QStringLiteral(",0")) &&
       set(PKEY_AppUserModel_ID, appUserModelId);
   store->Release();
