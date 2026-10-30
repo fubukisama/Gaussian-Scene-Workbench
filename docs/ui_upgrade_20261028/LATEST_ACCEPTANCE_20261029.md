@@ -1,6 +1,43 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **EXACT_D873_MENU_CLOUD_PACKAGE_PASS / FINITE_CLOSING_COMPLETE / NOT_FULL_ACCEPTANCE / NOT_MANAGED_DELIVERY**.
+Status: **EXACT_D873_MENU_CLOUD_PACKAGE_PASS / LOCAL_UNSIGNED_PREVIEW_DELIVERED / NOT_FULL_ACCEPTANCE / NOT_PUBLIC_PRODUCTION_RELEASE**.
+
+## 0G. 用户明确要求更新本地后：d873 本地开发预览已交付
+
+用户在候选包收尾后明确要求“记住 更新本地”。已将这条交付偏好保存为全局记忆注记和根AGENTS规则：
+软件升级任务不能只以push、CI或安装包链接代替实际本地更新；仍须遵守适用校验／授权，不擅自启动、
+关闭或置顶程序，也不能伪造完整验收或扩展为超长任务。
+
+本机状态实际刷新后确认：`D:/Apps/GSW` 已是未签名本地开发预览安装，protocol1，原活动版为
+`v1-e141f382cbed-local-preview`，无 `.update-trust-anchor`／`updates/trust`。
+只使用既有、明确隔离的 `local-developer-unsigned` 接纳路径：其原生代码会完整核验旧bootstrap文件集，
+内部专门允许现有protocol1；Offer的 `minimumBootstrapProtocol` 仍为2，没有改小或绕过检查。
+不走要求 `fullAcceptance=true` 的正式发布凭证路线，也未执行Setup、迁移bootstrap、配置生产feed或密钥。
+
+发布工具从与d873一致的源代码在D盘单独重新编译，只链接QtCore，无应用／GUI／自动测试执行。
+工具SHA256 `055990c1b97e9751f3c2633e6fd798dbd2a96c381060f33895ee5aea0e98195c`。
+已验d873 payload经现有packager重新封成完整本地更新ZIP，123293303 bytes，SHA256
+`a6fb85c1c93b5a49655f4010a9bb9b411b17b75a53b3fbda423367c1a19a2a95`。
+原生工具真实返回 `ok=true/code=ACTIVATED/admission=local-developer-unsigned/publisherAuthenticated=false`。
+
+实际独立回读（2026-10-30 17:55 JST）PASS：
+
+- `current.json` 为 `v1-d87343fa2153-local-preview`；活动主EXE SHA256
+  `8d61b27177ccf3e3cdf64bbb14932a00d58017036d0c689af2c2ec4d839270e8`，与精确d873候选一致。
+- 桌面和开始菜单共2个已识别原生快捷方式仍指向固定启动器，链接文件字节、参数、工作目录、图标和AUMID不变；没有重写快捷方式。
+- 固定bootstrap及其完整bin文件集不变；原e141与87两个旧版本保留，旧活动EXE摘要不变。
+- 已安装槽静态核验3059文件（3058个payload文件加原生生成的`release-files.json`）、1351后端记录、1597源码记录、28隐藏文件；native-only边界也PASS。
+- 未启动、关闭、重启或置顶GSW，没有开始／续训；设置、工程、原始照片、模型和检查点未改动。
+
+独立凭证：`D:/Codex/validation/gsw-ui-upgrade-20261028/local-d873-update-20261030/LOCAL_DELIVERY_READBACK.json`，
+SHA256 `c67d49b921a090e7a51c0d02668b030cb645110e945a4bf803ec2b56e0c450f9`；
+已安装静态凭证SHA256 `5c394551d9363e101838a1292e4058e517d48469fbe6db74503c8929992bbd53`。
+安装根自身另有 `updates/receipts/v1-d87343fa2153-local-preview.json`，mode=developer，SHA256
+`e692a50e4dba56da10809350b1404c743fd0740b4a4488ad1baa8c70b4f33fcd`。
+原候选包绑定凭证是之前未安装时的不可变快照，不改写其历史字段；本次本地交付单列此节。
+
+这是**本地未签名预览交付**，不是发布者认证、正式生产发布、完整UI／硬件／性能验收或完整更新器首装迁移通过。
+原4项性能INCONCLUSIVE、F10／全表面／NVIDIA／原生DPI等门槛和依赖告警继续保留；下次用户自行打开软件即使用新版本。
 
 ## 0F. 明确授权后的有界收尾完成：d873 菜单、完整 CI 和候选包通过
 
@@ -97,7 +134,8 @@ native-crt-manifest及COPYING／native/LICENSE.md／THIRD_PARTY_LICENSES.md已�
 最终文件凭证 `PACKAGE_BINDING_d87343f.json`。正式候选Setup位于其`setup/`子目录。
 本轮运行代码已push至main的d873，后续收尾文档提交不被冒充为重新构建／运行过的源码。
 
-本轮仍未启动本机应用／自动测试／安装器，未改 current、快捷方式、工程、照片、模型、设置或训练。
+上述CI／文件核验阶段未启动本机应用／自动测试／安装器，也未改 current、快捷方式、工程、照片、模型、设置或训练；
+后续用户新授权的本地预览交付独立记录于第0G节。
 完整66表面／29-ID、原性能 FAIL与4项 INCONCLUSIVE、硬件未验等边界保持不变；没有制造
 fullAcceptance 或本机发布许可。原293项依赖安全提示未在这次 UI 收尾中审计。
 
@@ -478,7 +516,7 @@ NVIDIA、真实跨屏及中等点云／网格／2DGS 压力仍未测。CPU / req
 | PERF-02 | NOT_RUN | 有效空闲／独立 cache 生命周期部分通过；局部 CPU / requested GPU 上限记录存在。 | 实际 driver VRAM／GPU timing、暗色、用户 NVIDIA 等仍未测。 |
 | PORT-01 | NOT_RUN | 固定 Blender4.5 / Lucide 来源、NOTICE、独立 Qt 适配和未移植范围已登记。 | 最终接受包 source／资源／依赖／许可／修改／hash 绑定未完成；不声称复制 Blender5.2.3 GPU AA。 |
 | PKG-01 | PASS | **d873候选**自己的App/Setup/source/清单/许可/隐藏文件、远端实际回读与本机静态核验通过（第0F节）；7f76旧接受及a539旧失败保留原身份。 | 仅文件和来源绑定，Setup未签名；不包含本机启动/安装、发布者认证或完整性能接受。 |
-| DELIVER-01 | NOT_RUN | 活动旧87版本和稳定 launcher 未改变。 | 没有新 publication / current / EXE / shortcut 读回；不得制造 `fullAcceptance:true`。 |
+| DELIVER-01 | NOT_RUN | 用户新授权的d873本地开发预览交付及current/EXE/2快捷方式独立回读PASS（0G）；固定bootstrap和旧版本保留。 | 私有unsigned接纳不冒充正式受信/生产DEL-01或完整产品接受；fullAcceptance仍false。 |
 | CLOUD-01 | PASS | **d873自己的NativeWindows三job与独立menu-alt均SUCCESS**（第0F节）；历史成功/失败保留，不跨源码继承。 | 限这两条既定流水线，不代表所有GitHub工作流；独立AutoUpdate/TLS/FIRST门、旧grid根因、硬件与完整UI仍各自保留。 |
 
 ## 8. 早期导航修复与来源边界
@@ -500,8 +538,9 @@ cases / 60/60 rings；RMSE `.06` / P95 `.16` / halo `.04` 冻结阈值未放宽�
 
 ## 9. 交付与下一步
 
-当前 **NOT_DELIVERED**：没有生成完整接受凭证、没有调用托管 publisher，没有切换
-`current.json` 或重写快捷方式。旧运行／回滚版本、用户设置、工程、照片、模型和检查点保留。
+正式受信／生产交付仍未完成；用户新授权的**本地开发预览**已通过原生私有publisher交付d873，
+`current.json`、活动EXE及2个固定入口回读一致（第0G节）。没有补造完整接受凭证、迁移引导或重写快捷方式。
+旧运行／回滚版本、用户设置、工程、照片、模型和检查点保留。
 
 当前聊天心跳`gsw-ui`已在提出新阶段审批时删除，本次获准的有界收尾未重建心跳。
 本轮软件／候选包收尾已完成，不继续自动扩项；新的长阶段须再次明确授权。
