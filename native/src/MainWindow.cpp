@@ -2,6 +2,7 @@
 #include "MultiItemList.h"
 #include "ManagedName.h"
 #include "AppLanguage.h"
+#include "DescribedMenuAction.h"
 #include "NativeUpdateUi.h"
 #include "NativeStartupHealth.h"
 #include "WindowUi.h"
@@ -2114,13 +2115,14 @@ void MainWindow::createMenus() {
   setWorkbenchActionIcon(appearanceMenu->menuAction(), WorkbenchIconId::Settings, palette());
   auto *themeGroup = new QActionGroup(appearanceMenu);
   themeGroup->setExclusive(true);
-  auto *automaticTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
+  auto *automaticTheme = AppLanguage::text(new QAction(appearanceMenu),
       AppLanguage::source("自动（按时间）"));
   automaticTheme->setObjectName(QStringLiteral("automaticThemeAction"));
   automaticTheme->setData(QStringLiteral("auto"));
   automaticTheme->setCheckable(true);
   automaticTheme->setChecked(AppTheme::currentThemeMode() == UiThemeMode::Automatic);
   AppLanguage::bind(automaticTheme, "toolTip", AppLanguage::source("按本机时间自动切换：06:00 至 18:00 前为浅色，其余时间为深色（午夜保持深色）；运行中自动更新并记住选择"));
+  addDescribedMenuAction(appearanceMenu, automaticTheme);
   auto *lightTheme = AppLanguage::text(appearanceMenu->addAction(QString()),
       AppLanguage::source("浅色（白天）"));
   lightTheme->setObjectName(QStringLiteral("lightThemeAction"));
