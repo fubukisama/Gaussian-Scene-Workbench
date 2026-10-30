@@ -1,6 +1,66 @@
 # UI Upgrade — 2026-10-29 范围化验收记录
 
-Status: **VERIFIED_7F76_PACKAGE_AND_A105_CLOUD / NEW_UI_REGRESSIONS_RUNNING / PERFORMANCE_REANALYSED_INCONCLUSIVE / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+Status: **EXACT_0EC_CLOUD_SUCCESS / ALT_MENU_A11Y_FAIL / AWAITING_EXPLICIT_LONG_TASK_APPROVAL / NOT_FULL_ACCEPTANCE / NOT_DELIVERED**.
+
+## 0E. 2026-10-30 收齐已有运行；停止后台，等待明确授权
+
+本节取代下文历史快照中的“正在运行／继续扩展探针”行动建议。此次仅收齐既有运行、
+读取直接日志并归档失败证据，没有调度新 CI、改生产代码、运行本机应用或切换安装。
+用户要求超长任务先获明确许可；下一轮修复及最终同源构建／包核对尚未获准，不自动继续。
+
+### 已完成完整 CI，仅对应精确 0ec 源码
+
+[Native Windows 40834717531](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40834717531)
+的 Qt、Upstream viewport、CodeQL 三个 job 最终均 **SUCCESS**。source
+`0ec86155d8e5480bb9a7b9ad23e583120c8d8944`、tree
+`f67a4e0788a97eae47b0fda20084ffa3138f2eb5`；不能改标成 6609643 或 9b5518f。
+
+直接 Qt job123316700062 日志确认4项 bootstrap PASS（298.17秒）、175/175 CTests PASS
+（2202.16秒）。实际产品上传后下载回读为 PASS、baselineCompared=true：3056文件、
+1351后端记录、1595源码记录、28隐藏文件，主 EXE SHA256
+`08401512a66fd56fc49ce52acddf1fac2e08fbf94ab8ca4d4f3d9e16ce33f592`。
+这不是本机重新核对该 EXE／Setup，也不是最新候选、全面 UI 或硬件验收。
+未下载这批非最终的大产品包。Grid bootstrap 12.77秒、完整 CTest 内2.09秒均为自然结果，
+不据此宣称历史15秒超时根因已修复。
+
+直接日志保留于
+`D:/Codex/validation/gsw-ui-upgrade-20261028/closing-run40834717531/qt-direct-job.log`，
+SHA256 `97439c0a3f293a01ce2872b9e54d279f29eb41c1072b1efd275f6ed01e72abe0`。
+
+### Alt 侧验收真实失败，不能改成菜单整体通过
+
+[Alt sideprobe 40840657094](https://github.com/fubukisama/GaussianSplattingWorkbench/actions/runs/40840657094)
+的 source `6609643d172ee0466202dec593661b2c40975df1`、tree
+`ae625f94c32762130feeb7cc4d9968f08ac06c12`，三个三语 CTests 最终均失败，合计12.40秒。
+每种语言：language 路径 PASS；appearance 路径 FAIL；workflow-idle、help 因前项失败均为
+`NOT_RUN_PREVIOUS_CASE_NOT_ACCEPTED`。即3个路径 PASS、3个 FAIL、6个 NOT_RUN，不是12项通过。
+
+实际 Alt 按下、自动 ShortcutOverride、释放及自然菜单焦点均被观察到；已执行的路径能用 ESC
+关闭并恢复焦点，没有触发动作，三份 receipt 的 publicStateUnchanged=true。
+失败断言为 `actual assistive explanation lacks an independently specified schedule/disabled-reason fragment`：
+自动主题的实际 QAccessible Description/Help 为空，未包含独立要求的 `06:00`／`18:00`。
+这里只确认公开无障碍边界失败，尚未完成实现根因诊断或修复；不猜测显示 tooltip 或底层 Qt 的原因。
+合成 Qt Alt 不代表物理／原生 OS 键盘通过；原 F10 NOT_RUN 保持不变。原34表单矩阵未在侧探针执行。
+
+唯一下载 artifact12883570390（4374171 bytes），ZIP SHA256
+`18ad45d75dd75611230632d70a04056e3ffe1db81532831dd99340f7a5048830`，已核服务端 digest 后解压。
+目录 `D:/Codex/validation/gsw-ui-upgrade-20261028/closing-run40840657094/`；
+`direct-job-api.log` SHA256 `73deb821767d367e147959def07508f9e5db18ae80944c32e06224a83647bab9`。
+三语 receipt SHA256：zh_CN `dfdb1a3ec75061fc4ed872e13293f502a190c8783c4e247b3ef8b086ca7b1aa8`；
+en_US `02e3b8fe2b12f794ef64d61ae325dc43854c0d7e25e6a2dd1b6f576b69720dd1`；
+ja_JP `c6d5c8c3f39a8f6abab197100e01895a7793ba9c8d957ceab1cefd2c635dfbc1`。
+
+### 收尾边界与下一次许可
+
+现有两项运行均已结束，无需继续轮询。本聊天心跳停止／删除，保留聊天、全部原 FAIL／NOT_RUN、
+性能4项 INCONCLUSIVE、硬件和66表面／29-ID未闭门槛。未武装／集成 native-input 草稿，
+未启动本机 GSW、修改 current／快捷方式或触及用户数据和训练。更新器也在等待人类确认收口范围，
+不能把其独立预览提议当成已获批准。
+
+如获批准，下一阶段仅诊断并最小修复这项无障碍失败、完成既定菜单复验，再对明确最终整合源
+核对其完整 CI 与 App／Setup／源码／回读证据；预计2–4小时，受远端排队和构建影响。
+不新增功能／输入框架；若出现新的超长阻塞则保存进度并停止报告，不无限重跑。
+该阶段仍不自动豁免硬件／性能等原验收条件，也不授权本机激活或缩减预览发布范围。
 
 ## 0D. 改名后的真实路径合同与单目标远端复验通过
 
