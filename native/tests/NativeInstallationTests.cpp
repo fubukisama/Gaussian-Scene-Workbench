@@ -15,6 +15,7 @@
 #include <shobjidl.h>
 #include <propkey.h>
 #include <propvarutil.h>
+#include <shlwapi.h>
 #endif
 
 class NativeInstallationTests final : public QObject {
@@ -215,6 +216,81 @@ private slots:
     QVERIFY(SUCCEEDED(store->GetValue(PKEY_AppUserModel_RelaunchCommand, &value)));
     QCOMPARE(value.vt, VARTYPE(VT_EMPTY)); PropVariantClear(&value);
     QVERIFY(gsw::setManagedTaskbarRelaunch(nullptr, "not-a-managed-install.exe", "GSW.Test.Stable"));
+#endif
+  }
+  void legacyBootstrapCannotRestoreTheOldRunningApplicationDisplayName() {
+#ifdef Q_OS_WIN
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    QVERIFY(SUCCEEDED(com));
+    const auto cleanup = qScopeGuard([] { CoUninitialize(); });
+    const QString launcher = QDir(root).filePath("bin/Gaussian Scene Workbench Launcher.exe");
+    const QString legacyFixture = QDir(QCoreApplication::applicationDirPath()).filePath(
+        "gsw_native_legacy_brand_fixture.exe");
+    QVERIFY(QFileInfo(legacyFixture).isFile());
+    QVERIFY(QFile::remove(launcher));
+    QVERIFY(QFile::copy(legacyFixture, launcher));
+    for (const auto &version : {"0.3.8-first", "0.3.8-next"}) {
+      const QString application = QDir(root).filePath(
+          QString("versions/%1/bin/Gaussian Scene Workbench.exe").arg(version));
+      QVERIFY(QFile::remove(application));
+      QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), application));
+    }
+    const auto hash = [](const QString &path) {
+      QFile file(path);
+      if (!file.open(QIODevice::ReadOnly)) return QByteArray();
+      return QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256);
+    };
+    const QByteArray launcherBefore = hash(launcher);
+    digest = hash(QCoreApplication::applicationFilePath()).toHex();
+    activate("0.3.8-next");
+    const QByteArray pointerBefore = hash(QDir(root).filePath("current.json"));
+    const auto resolveResource = [](const QString &reference) {
+      wchar_t resolved[256]{};
+      if (FAILED(SHLoadIndirectString(reinterpret_cast<LPCWSTR>(reference.utf16()),
+                                     resolved, 256, nullptr))) return QString();
+      return QString::fromWCharArray(resolved);
+    };
+    // Prove that this really models a retained pre-rename bootstrap, not two
+    // binaries that coincidentally expose the same new string resource.
+    const QString oldReference = QLatin1Char('@') + QDir::toNativeSeparators(launcher) + ",-201";
+    QCOMPARE(resolveResource(oldReference), QStringLiteral("Gaussian Scene Workbench"));
+    const QString runningApplication = QDir(root).filePath(
+        "versions/0.3.8-first/bin/Gaussian Scene Workbench.exe");
+    HWND window = CreateWindowExW(0, L"STATIC", L"owned hidden brand regression", WS_OVERLAPPED,
+                                  0, 0, 64, 64, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    QVERIFY(window);
+    const auto destroy = qScopeGuard([&] { DestroyWindow(window); });
+    const auto clear = qScopeGuard([&] { gsw::clearManagedTaskbarRelaunch(window, runningApplication); });
+    QVERIFY(gsw::setManagedTaskbarRelaunch(window, runningApplication, "GSW.Test.Stable"));
+    IPropertyStore *store = nullptr;
+    QVERIFY(SUCCEEDED(SHGetPropertyStoreForWindow(window, IID_PPV_ARGS(&store))));
+    const auto release = qScopeGuard([&] { store->Release(); });
+    const auto stringProperty = [&](REFPROPERTYKEY key) {
+      PROPVARIANT value; PropVariantInit(&value);
+      if (FAILED(store->GetValue(key, &value))) return QString();
+      const QString result = value.vt == VT_LPWSTR && value.pwszVal
+          ? QString::fromWCharArray(value.pwszVal) : QString();
+      PropVariantClear(&value);
+      return result;
+    };
+    // Relaunch stays on the stable entry, even if a newer slot is now active.
+    QCOMPARE(stringProperty(PKEY_AppUserModel_RelaunchCommand),
+        QLatin1Char('"') + QDir::toNativeSeparators(launcher) + QLatin1Char('"'));
+    QCOMPARE(stringProperty(PKEY_AppUserModel_ID), QStringLiteral("GSW.Test.Stable"));
+    const QString displayReference = stringProperty(PKEY_AppUserModel_RelaunchDisplayNameResource);
+    QCOMPARE(displayReference, QLatin1Char('@') +
+        QDir::toNativeSeparators(runningApplication) + ",-201");
+    QCOMPARE(resolveResource(displayReference), QStringLiteral("Gaussian Splatting Workbench"));
+    QCOMPARE(hash(launcher), launcherBefore);
+    QCOMPARE(hash(QDir(root).filePath("current.json")), pointerBefore);
+    gsw::clearManagedTaskbarRelaunch(window, runningApplication);
+    for (const auto &key : {PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand,
+                           PKEY_AppUserModel_RelaunchDisplayNameResource, PKEY_AppUserModel_RelaunchIconResource}) {
+      PROPVARIANT value; PropVariantInit(&value);
+      QVERIFY(SUCCEEDED(store->GetValue(key, &value)));
+      QCOMPARE(value.vt, VARTYPE(VT_EMPTY));
+      PropVariantClear(&value);
+    }
 #endif
   }
 };

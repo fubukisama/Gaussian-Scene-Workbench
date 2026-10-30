@@ -1138,6 +1138,17 @@ if(BUILD_TESTING)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
   qt_add_executable(gsw_native_installation_tests tests/NativeInstallationTests.cpp)
+  if(WIN32)
+    # The current test image shares the real product's display resource. The
+    # separate old-brand PE is loaded only as data, never run or installed.
+    target_sources(gsw_native_installation_tests PRIVATE assets/gsw-app-icon.rc)
+    add_executable(gsw_native_legacy_brand_fixture
+      tests/NativeLegacyBrandFixture.cpp tests/NativeLegacyBrandFixture.rc)
+    set_target_properties(gsw_native_legacy_brand_fixture PROPERTIES
+      AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+    add_dependencies(gsw_native_installation_tests gsw_native_legacy_brand_fixture)
+    target_link_libraries(gsw_native_installation_tests PRIVATE Shlwapi)
+  endif()
   qt_add_executable(gsw_native_shortcut_fixture tests/NativeShortcutFixture.cpp)
   target_link_libraries(gsw_native_shortcut_fixture PRIVATE Qt6::Core)
   if(WIN32)

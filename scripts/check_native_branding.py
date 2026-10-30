@@ -62,6 +62,16 @@ def inspect(ref=None):
             "installation binary lookup compatibility")
     require(f'201 "{DISPLAY}"' in read("native/assets/gsw-app-icon.rc"),
             "taskbar display-name resource")
+    installation = read("native/src/NativeInstallation.cpp")
+    runtime_relaunch = installation.partition("bool setManagedTaskbarRelaunch(")[2].partition(
+        "NativeShortcutInfo readNativeShortcut(")[0]
+    require('QDir::toNativeSeparators(applicationPath)' in runtime_relaunch and
+            'set(PKEY_AppUserModel_RelaunchDisplayNameResource, QLatin1Char(\'@\') + displayApplication' in runtime_relaunch,
+            "running application owns taskbar display resource, not retained bootstrap")
+    require('set(PKEY_AppUserModel_RelaunchCommand, QLatin1Char(\'\"\') + launcher' in runtime_relaunch and
+            'set(PKEY_AppUserModel_RelaunchIconResource, launcher' in runtime_relaunch and
+            'set(PKEY_AppUserModel_ID, appUserModelId)' in runtime_relaunch,
+            "runtime display rename preserves stable command icon and app identity")
 
     catalog = json.loads(read("native/i18n/catalog.json"))
     branded = {key: value for key, value in catalog.items() if DISPLAY in key}
